@@ -204,27 +204,84 @@ app.get('/api/extras', wrap(async (req, res) => {
 
 // GET /api/vehicles
 app.get('/api/vehicles', wrap(async (req, res) => {
-  const { city = '%', start, end, category } = req.query;
-  if (start && end) {
-    const q = await pool.query(
-      'SELECT * FROM fn_available_vehicles($1, $2, $3)',
-      [city, start, end]
-    );
-    let rows = q.rows;
-    if (category) {
-      rows = rows.filter(v => v.category.toLowerCase() === category.toLowerCase());
-    }
-    res.json(rows);
-  } else {
-    let query = 'SELECT * FROM v_vehicle_catalog WHERE city ILIKE $1';
-    const params = [city];
-    if (category) {
-      params.push(category);
-      query += ` AND category ILIKE $${params.length}`;
-    }
-    const q = await pool.query(query, params);
-    res.json(q.rows);
+  const { city = '%', start, end, category, type, available_only } = req.query;
+  const hasDates = start && end && !isNaN(Date.parse(start)) && !isNaN(Date.parse(end));
+
+  const params = [];
+  let availabilityExpression = "CASE WHEN v.status = 'available' THEN true ELSE false END";
+
+  if (hasDates) {
+    params.push(start, end);
+    availabilityExpression = `CASE
+        WHEN v.status != 'available' THEN false
+        WHEN EXISTS (
+          SELECT 1 FROM bookings bk
+          WHERE bk.vehicle_id = v.vehicle_id
+            AND bk.status IN ('pending', 'confirmed', 'active')
+            AND bk.period && tstzrange($1::timestamptz, $2::timestamptz, '[)')
+        ) THEN false
+        ELSE true
+      END`;
   }
+
+  let query = `
+    SELECT
+      v.vehicle_id,
+      v.reg_number,
+      v.make,
+      v.model,
+      v.fuel,
+      v.transmission,
+      v.image_url,
+      v.status,
+      v.odometer_km,
+      b.branch_id,
+      b.name AS branch_name,
+      b.city,
+      c.category_id,
+      c.name AS category,
+      c.seats,
+      c.base_daily_rate,
+      ${availabilityExpression} AS is_available
+    FROM vehicles v
+    JOIN vehicle_categories c USING (category_id)
+    JOIN branches b USING (branch_id)
+    WHERE 1=1
+  `;
+
+  if (city && city !== '%' && city.trim() !== '') {
+    params.push(city);
+    query += ` AND b.city ILIKE $${params.length}`;
+  }
+
+  if (category && category.trim() !== '' && category.toLowerCase() !== 'all') {
+    params.push(category);
+    query += ` AND c.name ILIKE $${params.length}`;
+  }
+
+  if (type === 'bike') {
+    query += ` AND c.name ILIKE 'Bike'`;
+  } else if (type === 'car') {
+    query += ` AND c.name NOT ILIKE 'Bike'`;
+  }
+
+  if (available_only === 'true') {
+    if (hasDates) {
+      query += ` AND v.status = 'available' AND NOT EXISTS (
+        SELECT 1 FROM bookings bk
+        WHERE bk.vehicle_id = v.vehicle_id
+          AND bk.status IN ('pending', 'confirmed', 'active')
+          AND bk.period && tstzrange($1::timestamptz, $2::timestamptz, '[)')
+      )`;
+    } else {
+      query += ` AND v.status = 'available'`;
+    }
+  }
+
+  query += ` ORDER BY v.vehicle_id ASC`;
+
+  const q = await pool.query(query, params);
+  res.json(q.rows);
 }));
 
 // GET /api/vehicles/:id (queries vehicles table directly, so maintenance/retired vehicles are fetchable)

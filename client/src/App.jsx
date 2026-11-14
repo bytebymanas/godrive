@@ -203,7 +203,8 @@ function AdminNav() {
   return (
     <div style={{ display: 'flex', gap: '8px', marginBottom: '28px', borderBottom: '1px solid #e8eeeb', paddingBottom: '14px', flexWrap: 'wrap' }}>
       <NavLink to="/admin" end className={({ isActive }) => `tab-btn ${isActive ? 'active' : ''}`}>Dashboard</NavLink>
-      <NavLink to="/fleet" className={({ isActive }) => `tab-btn ${isActive ? 'active' : ''}`}>Fleet Manager</NavLink>
+      <NavLink to="/fleet" className={({ isActive }) => `tab-btn ${isActive ? 'active' : ''}`}>Fleet Manager (All 30)</NavLink>
+      <NavLink to="/search" className={({ isActive }) => `tab-btn ${isActive ? 'active' : ''}`}>Explore Catalog View</NavLink>
       <NavLink to="/users" className={({ isActive }) => `tab-btn ${isActive ? 'active' : ''}`}>Users</NavLink>
       <NavLink to="/audit" className={({ isActive }) => `tab-btn ${isActive ? 'active' : ''}`}>Audit Log</NavLink>
       <NavLink to="/masters" className={({ isActive }) => `tab-btn ${isActive ? 'active' : ''}`}>Masters</NavLink>
@@ -228,9 +229,7 @@ function Layout({ children }) {
         </Link>
         <nav>
           <NavLink to="/" end>Home</NavLink>
-          {(!user || user.role === 'customer') && (
-            <NavLink to="/search">Explore cars</NavLink>
-          )}
+          <NavLink to="/search">Explore Fleet</NavLink>
 
           {user && user.role === 'customer' && (
             <>
@@ -355,7 +354,7 @@ function Home() {
               className="search-btn"
               to={`/search?city=${encodeURIComponent(city)}&start=${start}&end=${end}`}
             >
-              <Search size={18} /> Find a car
+              <Search size={18} /> Explore vehicles
             </Link>
           </div>
 
@@ -371,7 +370,7 @@ function Home() {
           />
           <div className="float-card">
             <b>Drive your way</b>
-            <span>Find the right car for every road.</span>
+            <span>Find the right vehicle for every road.</span>
           </div>
         </div>
       </section>
@@ -387,18 +386,19 @@ function Home() {
           </Link>
         </div>
 
-        <div className="categories">
+        <div className="categories" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
           {[
-            { label: 'City friendly', cat: 'Hatchback', imgClass: 'cat0' },
-            { label: 'Room for more', cat: 'Full-size SUV', imgClass: 'cat1' },
-            { label: 'Open road', cat: 'Sedan', imgClass: 'cat2' },
+            { label: 'Bikes & Two-Wheelers', cat: 'Bike', img: 'https://images.unsplash.com/photo-1558981403-c5f9899a28bc?auto=format&fit=crop&w=600&q=80' },
+            { label: 'City Hatchbacks', cat: 'Hatchback', img: 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?auto=format&fit=crop&w=600&q=80' },
+            { label: 'Executive Sedans', cat: 'Sedan', img: 'https://images.unsplash.com/photo-1617788138017-80ad40651399?auto=format&fit=crop&w=600&q=80' },
+            { label: 'All-Terrain SUVs', cat: 'SUV', img: 'https://images.unsplash.com/photo-1519641471654-76ce0107ad1b?auto=format&fit=crop&w=600&q=80' },
           ].map(x => (
             <Link
-              to={`/search?city=${encodeURIComponent(city)}&category=${encodeURIComponent(x.cat)}&start=${start}&end=${end}`}
+              to={`/search?category=${encodeURIComponent(x.cat)}`}
               className="category"
               key={x.label}
             >
-              <div className={`cat-img ${x.imgClass}`} />
+              <div className="cat-img" style={{ backgroundImage: `url(${x.img})` }} />
               <span>{x.label}</span>
               <ArrowRight size={16} />
             </Link>
@@ -419,28 +419,33 @@ function Home() {
           </div>
 
           <div className="car-grid">
-            {featured.map(v => (
-              <article className="car-card" key={v.vehicle_id}>
-                <img
-                  src={v.image_url || 'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=900&q=80'}
-                  alt={`${v.make} ${v.model}`}
-                />
-                <div className="car-body">
-                  <div className="card-top">
-                    <span>{v.category}</span>
-                    <span><Star size={13} fill="currentColor" /> 4.9</span>
+            {featured.map(v => {
+              const isBike = v.category?.toLowerCase() === 'bike';
+              return (
+                <article className="car-card" key={v.vehicle_id}>
+                  <img
+                    src={v.image_url || (isBike
+                      ? 'https://images.unsplash.com/photo-1558981403-c5f9899a28bc?auto=format&fit=crop&w=800&q=80'
+                      : 'https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?auto=format&fit=crop&w=800&q=80')}
+                    alt={`${v.make} ${v.model}`}
+                  />
+                  <div className="car-body">
+                    <div className="card-top">
+                      <span>{isBike ? '🏍️ ' + v.category : '🚗 ' + v.category}</span>
+                      <span><Star size={13} fill="currentColor" /> 4.9</span>
+                    </div>
+                    <h3>{v.make} {v.model}</h3>
+                    <p>{v.city} · {v.seats} {isBike ? 'seat' : 'seats'} · {v.transmission}</p>
+                    <div className="card-bottom">
+                      <b>{money(v.base_daily_rate)} <small>/ day</small></b>
+                      <Link to={`/checkout?vehicle_id=${v.vehicle_id}&start=${start}&end=${end}`}>
+                        {isBike ? 'Book bike' : 'Book vehicle'} <ArrowRight size={14} />
+                      </Link>
+                    </div>
                   </div>
-                  <h3>{v.make} {v.model}</h3>
-                  <p>{v.city} · {v.seats} seats · {v.transmission}</p>
-                  <div className="card-bottom">
-                    <b>{money(v.base_daily_rate)} <small>/ day</small></b>
-                    <Link to={`/checkout?vehicle_id=${v.vehicle_id}&start=${start}&end=${end}`}>
-                      Book now <ArrowRight size={14} />
-                    </Link>
-                  </div>
-                </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </div>
         </section>
       )}
@@ -466,6 +471,8 @@ function SearchPage() {
   const [start, setStart] = useState(startParam);
   const [end, setEnd] = useState(endParam);
   const [category, setCategory] = useState(categoryParam);
+  const [typeFilter, setTypeFilter] = useState('all'); // 'all', 'bikes', 'cars'
+  const [sortBy, setSortBy] = useState('default'); // 'default', 'bikes_first', 'cars_first', 'price_asc', 'price_desc', 'name'
 
   const [items, setItems] = useState([]);
   const [busy, setBusy] = useState(true);
@@ -497,11 +504,39 @@ function SearchPage() {
     setParams(newParams);
   };
 
+  // Filter & Sort logic
+  let displayedItems = [...items];
+  if (typeFilter === 'bikes') {
+    displayedItems = displayedItems.filter(v => v.category?.toLowerCase() === 'bike');
+  } else if (typeFilter === 'cars') {
+    displayedItems = displayedItems.filter(v => v.category?.toLowerCase() !== 'bike');
+  }
+
+  if (sortBy === 'bikes_first') {
+    displayedItems.sort((a, b) => {
+      const aIsBike = a.category?.toLowerCase() === 'bike' ? 0 : 1;
+      const bIsBike = b.category?.toLowerCase() === 'bike' ? 0 : 1;
+      return aIsBike - bIsBike;
+    });
+  } else if (sortBy === 'cars_first') {
+    displayedItems.sort((a, b) => {
+      const aIsCar = a.category?.toLowerCase() !== 'bike' ? 0 : 1;
+      const bIsCar = b.category?.toLowerCase() !== 'bike' ? 0 : 1;
+      return aIsCar - bIsCar;
+    });
+  } else if (sortBy === 'price_asc') {
+    displayedItems.sort((a, b) => Number(a.base_daily_rate) - Number(b.base_daily_rate));
+  } else if (sortBy === 'price_desc') {
+    displayedItems.sort((a, b) => Number(b.base_daily_rate) - Number(a.base_daily_rate));
+  } else if (sortBy === 'name') {
+    displayedItems.sort((a, b) => `${a.make} ${a.model}`.localeCompare(`${b.make} ${b.model}`));
+  }
+
   return (
     <main className="page">
       <div className="eyebrow">THE GO DRIVE COLLECTION</div>
-      <h1>Find your next ride</h1>
-      <p className="muted">Comfort, confidence, and a little more freedom.</p>
+      <h1>Explore Our Fleet</h1>
+      <p className="muted">Browse all {items.length || 30} verified cars and motorcycles. Choose your vehicle, branch, and travel dates.</p>
 
       {/* Search Filters Bar */}
       <form
@@ -518,8 +553,8 @@ function SearchPage() {
           marginTop: '24px'
         }}
       >
-        <div style={{ flex: '1', minWidth: '140px' }}>
-          <label style={{ fontSize: '11px', color: '#68746e', display: 'block', marginBottom: '4px', fontWeight: 600 }}>CITY</label>
+        <div style={{ flex: '1', minWidth: '130px' }}>
+          <label style={{ fontSize: '11px', color: '#68746e', display: 'block', marginBottom: '4px', fontWeight: 600 }}>CITY / BRANCH</label>
           <select
             value={city}
             onChange={e => setCity(e.target.value)}
@@ -540,15 +575,31 @@ function SearchPage() {
             className="input-field"
           >
             <option value="">All Categories</option>
-            <option value="Hatchback">Hatchback</option>
-            <option value="Sedan">Sedan</option>
-            <option value="Compact SUV">Compact SUV</option>
-            <option value="Full-size SUV">Full-size SUV</option>
-            <option value="Luxury">Luxury</option>
+            <option value="Bike">🏍️ Bikes & Motorcycles</option>
+            <option value="Hatchback">🚗 Hatchback</option>
+            <option value="Sedan">🚗 Sedan</option>
+            <option value="SUV">🚙 SUV</option>
+            <option value="Van">🚐 Van</option>
           </select>
         </div>
 
         <div style={{ flex: '1', minWidth: '140px' }}>
+          <label style={{ fontSize: '11px', color: '#68746e', display: 'block', marginBottom: '4px', fontWeight: 600 }}>SORT BY</label>
+          <select
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value)}
+            className="input-field"
+          >
+            <option value="default">Default Catalog Order</option>
+            <option value="bikes_first">🏍️ Bikes First</option>
+            <option value="cars_first">🚗 Cars First</option>
+            <option value="price_asc">Price: Low to High</option>
+            <option value="price_desc">Price: High to Low</option>
+            <option value="name">Vehicle Name: A to Z</option>
+          </select>
+        </div>
+
+        <div style={{ flex: '1', minWidth: '130px' }}>
           <label style={{ fontSize: '11px', color: '#68746e', display: 'block', marginBottom: '4px', fontWeight: 600 }}>PICK-UP</label>
           <input
             type="date"
@@ -559,7 +610,7 @@ function SearchPage() {
           />
         </div>
 
-        <div style={{ flex: '1', minWidth: '140px' }}>
+        <div style={{ flex: '1', minWidth: '130px' }}>
           <label style={{ fontSize: '11px', color: '#68746e', display: 'block', marginBottom: '4px', fontWeight: 600 }}>RETURN</label>
           <input
             type="date"
@@ -571,59 +622,120 @@ function SearchPage() {
         </div>
 
         <div style={{ alignSelf: 'flex-end' }}>
-          <button type="submit" className="primary" style={{ padding: '10px 20px', borderRadius: '8px' }}>
-            <Search size={16} /> Filter Cars
+          <button type="submit" className="primary" style={{ padding: '10px 18px', borderRadius: '8px' }}>
+            <Search size={16} /> Filter Fleet
           </button>
         </div>
       </form>
 
+      {/* Quick Type & Group Filter Tabs */}
+      <div style={{ display: 'flex', gap: '8px', margin: '20px 0 10px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <button
+          type="button"
+          onClick={() => setTypeFilter('all')}
+          className={`tab-btn ${typeFilter === 'all' ? 'active' : ''}`}
+        >
+          All Fleet ({items.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setTypeFilter('bikes')}
+          className={`tab-btn ${typeFilter === 'bikes' ? 'active' : ''}`}
+        >
+          🏍️ Bikes & Two-Wheelers ({items.filter(x => x.category?.toLowerCase() === 'bike').length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setTypeFilter('cars')}
+          className={`tab-btn ${typeFilter === 'cars' ? 'active' : ''}`}
+        >
+          🚗 Cars ({items.filter(x => x.category?.toLowerCase() !== 'bike').length})
+        </button>
+
+        <div style={{ marginLeft: 'auto', fontSize: '12px', color: '#65716d', fontWeight: 500 }}>
+          Showing {displayedItems.length} of {items.length} vehicles
+        </div>
+      </div>
+
       {busy ? (
         <div className="loading" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <RefreshCw size={18} className="animate-spin" /> Finding available cars…
+          <RefreshCw size={18} className="spin" /> Updating vehicle catalog…
         </div>
       ) : error ? (
         <div className="notice">
           {error} <button onClick={loadVehicles}>Retry</button>
         </div>
-      ) : !items.length ? (
+      ) : !displayedItems.length ? (
         <div className="empty">
-          No vehicles found for those criteria. Try expanding your search to all cities or other dates.
+          No vehicles match the selected criteria. Try selecting "All Categories" or "All Fleet".
         </div>
       ) : (
         <div className="car-grid">
-          {items.map(v => (
-            <article className="car-card" key={v.vehicle_id}>
-              <img
-                src={v.image_url || 'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=900&q=80'}
-                alt={`${v.make} ${v.model}`}
-              />
-              <div className="car-body">
-                <div className="card-top">
-                  <span>{v.category}</span>
-                  <span><Star size={13} fill="currentColor" /> 4.9</span>
+          {displayedItems.map(v => {
+            const isBike = v.category?.toLowerCase() === 'bike';
+            const available = v.is_available !== false && v.status === 'available';
+            const defaultImg = isBike
+              ? 'https://images.unsplash.com/photo-1558981403-c5f9899a28bc?auto=format&fit=crop&w=800&q=80'
+              : 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?auto=format&fit=crop&w=800&q=80';
+
+            return (
+              <article className="car-card" key={v.vehicle_id} style={{ opacity: available ? 1 : 0.9 }}>
+                <div style={{ position: 'relative' }}>
+                  <img
+                    src={v.image_url || defaultImg}
+                    alt={`${v.make} ${v.model}`}
+                    style={{ width: '100%', height: '205px', objectFit: 'cover' }}
+                  />
+                  {!available && (
+                    <span style={{ position: 'absolute', top: '12px', right: '12px', background: '#b91c1c', color: '#fff', fontSize: '11px', fontWeight: 700, padding: '4px 8px', borderRadius: '6px', boxShadow: '0 2px 6px rgba(0,0,0,0.25)' }}>
+                      {v.status !== 'available' ? v.status.toUpperCase() : 'BOOKED FOR DATES'}
+                    </span>
+                  )}
+                  {available && (
+                    <span style={{ position: 'absolute', top: '12px', right: '12px', background: '#15803d', color: '#fff', fontSize: '10px', fontWeight: 700, padding: '3px 8px', borderRadius: '6px', boxShadow: '0 2px 6px rgba(0,0,0,0.2)' }}>
+                      AVAILABLE
+                    </span>
+                  )}
                 </div>
-                <h3>{v.make} {v.model}</h3>
-                <p>{v.city} · {v.seats} seats · {v.fuel} · {v.transmission}</p>
-                <div className="card-bottom">
-                  <b>{money(v.base_daily_rate)} <small>/ day</small></b>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <Link
-                      to={`/vehicle/${v.vehicle_id}?start=${start}&end=${end}`}
-                      style={{ fontSize: '12px', fontWeight: 600, color: '#52615b', padding: '6px 10px', background: '#f2f6f4', borderRadius: '6px' }}
-                    >
-                      Details
-                    </Link>
-                    <Link
-                      to={`/checkout?vehicle_id=${v.vehicle_id}&start=${start}&end=${end}`}
-                      style={{ fontSize: '12px', fontWeight: 700, color: '#176b5b', padding: '6px 10px', background: '#eff6f2', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                    >
-                      Book <ArrowRight size={13} />
-                    </Link>
+                <div className="car-body">
+                  <div className="card-top">
+                    <span>{isBike ? '🏍️ ' + v.category : '🚗 ' + v.category}</span>
+                    <span><Star size={13} fill="currentColor" /> 4.9</span>
+                  </div>
+                  <h3 style={{ margin: '8px 0 4px', fontSize: '18px' }}>{v.make} {v.model}</h3>
+                  <p style={{ margin: 0, fontSize: '13px', color: '#65716d' }}>
+                    {v.city} · {v.seats} {isBike ? 'seater' : 'seats'} · {v.fuel} · {v.transmission}
+                  </p>
+                  <div className="card-bottom" style={{ marginTop: '14px' }}>
+                    <b>{money(v.base_daily_rate)} <small>/ day</small></b>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <Link
+                        to={`/vehicle/${v.vehicle_id}?start=${start}&end=${end}`}
+                        style={{ fontSize: '12px', fontWeight: 600, color: '#52615b', padding: '6px 10px', background: '#f2f6f4', borderRadius: '6px' }}
+                      >
+                        Details
+                      </Link>
+                      {available ? (
+                        <Link
+                          to={`/checkout?vehicle_id=${v.vehicle_id}&start=${start}&end=${end}`}
+                          style={{ fontSize: '12px', fontWeight: 700, color: '#176b5b', padding: '6px 10px', background: '#eff6f2', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          {isBike ? 'Book Bike' : 'Book Car'} <ArrowRight size={13} />
+                        </Link>
+                      ) : (
+                        <Link
+                          to={`/vehicle/${v.vehicle_id}?start=${start}&end=${end}`}
+                          style={{ fontSize: '11px', color: '#748079', fontWeight: 600, padding: '6px 8px', background: '#f8faf9', borderRadius: '6px' }}
+                        >
+                          View Dates
+                        </Link>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </div>
       )}
     </main>
@@ -700,7 +812,7 @@ function Vehicle() {
               to={`/checkout?vehicle_id=${v.vehicle_id}&start=${start}&end=${end}`}
               style={{ width: '100%', justifyContent: 'center', borderRadius: '8px' }}
             >
-              Book this car <ArrowRight size={16} />
+              {v.category?.toLowerCase() === 'bike' ? 'Book this bike' : 'Book this vehicle'} <ArrowRight size={16} />
             </Link>
           </div>
         </div>
@@ -885,7 +997,7 @@ function Checkout() {
     } catch (err) {
       let msg = err.message;
       if (msg.includes('exclude') || msg.includes('booked') || msg.includes('conflict')) {
-        msg = 'Vehicle is already booked for these dates. Please choose different dates or another car.';
+        msg = 'Vehicle is already booked for these dates. Please choose different dates or another vehicle.';
       }
       setErrorNotice(msg);
       toast.error(msg);
@@ -1195,7 +1307,7 @@ function MyBookings() {
       ) : !data.length ? (
         <div className="empty">
           No bookings yet. Your next journey is just around the corner.{' '}
-          <Link to="/search" style={{ color: '#176b5b', fontWeight: 700 }}>Explore our cars →</Link>
+          <Link to="/search" style={{ color: '#176b5b', fontWeight: 700 }}>Explore our fleet →</Link>
         </div>
       ) : (
         <div className="booking-list">
@@ -1339,7 +1451,7 @@ function MyBookings() {
             <textarea
               value={comment}
               onChange={e => setComment(e.target.value)}
-              placeholder="Tell others how clean, comfortable, and reliable the car was…"
+              placeholder="Tell others how clean, comfortable, and reliable the vehicle was…"
               rows={3}
               className="input-field"
               style={{ resize: 'vertical' }}
@@ -2250,6 +2362,7 @@ function FleetManager() {
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [newVehicle, setNewVehicle] = useState({
@@ -2366,7 +2479,8 @@ function FleetManager() {
     const text = `${v.make} ${v.model} ${v.reg_number} ${v.city}`.toLowerCase();
     const matchesText = text.includes(search.toLowerCase());
     const matchesStatus = statusFilter === 'all' || v.status === statusFilter;
-    return matchesText && matchesStatus;
+    const matchesCategory = categoryFilter === 'all' || v.category === categoryFilter;
+    return matchesText && matchesStatus && matchesCategory;
   });
 
   return (
@@ -2375,9 +2489,9 @@ function FleetManager() {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <div>
-          <div className="eyebrow">ASSET INVENTORY</div>
-          <h1 style={{ margin: '4px 0' }}>Fleet Manager</h1>
-          <p className="muted" style={{ margin: 0 }}>Register vehicles, track maintenance, and toggle operational states.</p>
+          <div className="eyebrow">ASSET INVENTORY & FLEET GOVERNANCE</div>
+          <h1 style={{ margin: '4px 0' }}>Fleet Manager ({vehicles.length} Vehicles)</h1>
+          <p className="muted" style={{ margin: 0 }}>Register vehicles, track maintenance, inspect photos, and toggle operational states across branches.</p>
         </div>
         <button onClick={() => setShowAddModal(true)} className="btn-primary">
           <Plus size={16} /> Add New Vehicle
@@ -2385,11 +2499,11 @@ function FleetManager() {
       </div>
 
       {/* Filters Bar */}
-      <div style={{ display: 'flex', gap: '12px', background: '#f8faf9', padding: '14px', borderRadius: '12px', border: '1px solid #edf0ee', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', gap: '12px', background: '#f8faf9', padding: '14px', borderRadius: '12px', border: '1px solid #edf0ee', marginBottom: '20px', flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: '220px' }}>
           <input
             type="text"
-            placeholder="Search make, model, or registration…"
+            placeholder="Search make, model, registration, or city…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="input-field"
@@ -2397,16 +2511,30 @@ function FleetManager() {
         </div>
 
         <select
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
+          value={categoryFilter}
+          onChange={e => setCategoryFilter(e.target.value)}
           className="input-field"
           style={{ width: '180px' }}
         >
+          <option value="all">All Categories</option>
+          <option value="Bike">🏍️ Bikes & Motorcycles</option>
+          <option value="Hatchback">🚗 Hatchback</option>
+          <option value="Sedan">🚗 Sedan</option>
+          <option value="SUV">🚙 SUV</option>
+          <option value="Van">🚐 Van</option>
+        </select>
+
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          className="input-field"
+          style={{ width: '160px' }}
+        >
           <option value="all">All Statuses</option>
-          <option value="available">Available</option>
-          <option value="rented">Rented</option>
-          <option value="maintenance">Maintenance</option>
-          <option value="retired">Retired</option>
+          <option value="available">Available ({vehicles.filter(x => x.status === 'available').length})</option>
+          <option value="rented">Rented ({vehicles.filter(x => x.status === 'rented').length})</option>
+          <option value="maintenance">Maintenance ({vehicles.filter(x => x.status === 'maintenance').length})</option>
+          <option value="retired">Retired ({vehicles.filter(x => x.status === 'retired').length})</option>
         </select>
       </div>
 
@@ -2416,6 +2544,7 @@ function FleetManager() {
         <table className="data-table">
           <thead>
             <tr>
+              <th>Photo</th>
               <th>Reg Number</th>
               <th>Make & Model</th>
               <th>Category</th>
@@ -2426,17 +2555,28 @@ function FleetManager() {
             </tr>
           </thead>
           <tbody>
-            {filteredVehicles.map(v => (
+            {filteredVehicles.map(v => {
+              const isBike = v.category?.toLowerCase() === 'bike';
+              return (
               <tr key={v.vehicle_id}>
+                <td>
+                  <img
+                    src={v.image_url || (isBike
+                      ? 'https://images.unsplash.com/photo-1558981403-c5f9899a28bc?auto=format&fit=crop&w=120&q=80'
+                      : 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?auto=format&fit=crop&w=120&q=80')}
+                    alt={v.model}
+                    style={{ width: '55px', height: '38px', objectFit: 'cover', borderRadius: '6px' }}
+                  />
+                </td>
                 <td><b>{v.reg_number}</b></td>
                 <td>
-                  {v.make} {v.model}
+                  <b>{v.make} {v.model}</b>
                   <span style={{ fontSize: '11px', color: '#748079', display: 'block' }}>{v.fuel} · {v.transmission}</span>
                 </td>
-                <td>{v.category}</td>
+                <td>{isBike ? '🏍️ ' + v.category : '🚗 ' + v.category}</td>
                 <td>{v.branch_name} ({v.city})</td>
                 <td><StatusChip status={v.status} /></td>
-                <td>{v.odometer || 0} km</td>
+                <td>{v.odometer_km || 0} km</td>
                 <td>
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <select
@@ -2460,7 +2600,7 @@ function FleetManager() {
                   </div>
                 </td>
               </tr>
-            ))}
+            );})}
           </tbody>
         </table>
       )}
@@ -3609,6 +3749,8 @@ export default function App() {
           <Route path="/users" element={<UsersManager />} />
           <Route path="/audit" element={<AuditLog />} />
           <Route path="/signup" element={<Auth signup />} />
+
+
           <Route path="/login" element={<Auth />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
@@ -3616,3 +3758,8 @@ export default function App() {
     </AuthProvider>
   );
 }
+
+
+
+
+
