@@ -1,0 +1,11 @@
+DO $$ BEGIN CREATE ROLE rental_app LOGIN PASSWORD 'change_me'; EXCEPTION WHEN duplicate_object THEN ALTER ROLE rental_app PASSWORD 'change_me'; END $$;
+DO $$ BEGIN CREATE ROLE rental_report LOGIN PASSWORD 'change_me_2'; EXCEPTION WHEN duplicate_object THEN ALTER ROLE rental_report PASSWORD 'change_me_2'; END $$;
+GRANT CONNECT ON DATABASE rental_db TO rental_app,rental_report;
+GRANT USAGE ON SCHEMA public TO rental_app,rental_report;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO rental_app;
+GRANT INSERT,UPDATE ON users,customer_profiles,vehicles,branches,vehicle_categories,extras,maintenance_records,damage_reports,reviews TO rental_app;
+GRANT SELECT,INSERT,UPDATE ON bookings,booking_extras,payments,rentals TO rental_app;
+GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO rental_app;
+REVOKE UPDATE,DELETE,INSERT ON audit_log FROM rental_app;
+GRANT SELECT ON v_vehicle_catalog,mv_monthly_revenue,v_top_customers,v_category_revenue,v_vehicle_ranks,v_revenue_change,v_never_booked,v_overdue_returns TO rental_report;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO rental_app;
