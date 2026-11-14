@@ -4,6 +4,11 @@ CREATE TRIGGER trg_users_updated BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUN
 CREATE OR REPLACE FUNCTION fn_audit() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE rec JSONB; BEGIN rec:=CASE WHEN TG_OP='DELETE' THEN to_jsonb(OLD) ELSE to_jsonb(NEW) END; INSERT INTO audit_log(table_name,record_id,action,old_data,new_data,changed_by) VALUES(TG_TABLE_NAME,(rec->>TG_ARGV[0])::BIGINT,TG_OP,CASE WHEN TG_OP IN('UPDATE','DELETE') THEN to_jsonb(OLD) END,CASE WHEN TG_OP IN('INSERT','UPDATE') THEN to_jsonb(NEW) END,NULLIF(current_setting('app.current_user_id',true),'')::BIGINT); RETURN NULL; END $$;
 CREATE TRIGGER trg_bookings_audit AFTER INSERT OR UPDATE OR DELETE ON bookings FOR EACH ROW EXECUTE FUNCTION fn_audit('booking_id');
 CREATE TRIGGER trg_vehicles_audit AFTER INSERT OR UPDATE OR DELETE ON vehicles FOR EACH ROW EXECUTE FUNCTION fn_audit('vehicle_id');
+CREATE TRIGGER trg_rentals_audit AFTER INSERT OR UPDATE OR DELETE ON rentals FOR EACH ROW EXECUTE FUNCTION fn_audit('rental_id');
+CREATE TRIGGER trg_payments_audit AFTER INSERT OR UPDATE OR DELETE ON payments FOR EACH ROW EXECUTE FUNCTION fn_audit('payment_id');
+CREATE TRIGGER trg_users_audit AFTER INSERT OR UPDATE OR DELETE ON users FOR EACH ROW EXECUTE FUNCTION fn_audit('user_id');
+CREATE TRIGGER trg_damage_audit AFTER INSERT OR UPDATE OR DELETE ON damage_reports FOR EACH ROW EXECUTE FUNCTION fn_audit('report_id');
+CREATE TRIGGER trg_reviews_audit AFTER INSERT OR UPDATE OR DELETE ON reviews FOR EACH ROW EXECUTE FUNCTION fn_audit('review_id');
 CREATE OR REPLACE FUNCTION create_booking(p_customer_id BIGINT,p_vehicle_id BIGINT,p_start TIMESTAMPTZ,p_end TIMESTAMPTZ,p_pickup_branch INT,p_drop_branch INT,p_method payment_method,p_extra_ids INT[] DEFAULT '{}') RETURNS BIGINT LANGUAGE plpgsql AS $$ DECLARE v_rate NUMERIC(10,2); v_days INT; v_total NUMERIC(10,2); v_id BIGINT; v_extra NUMERIC(10,2); BEGIN
  IF p_end<=p_start THEN RAISE EXCEPTION 'End must be after start'; END IF; IF p_start<now()-INTERVAL '5 minutes' THEN RAISE EXCEPTION 'Start date is in the past'; END IF;
  IF NOT EXISTS(SELECT 1 FROM users u JOIN customer_profiles cp USING(user_id) WHERE u.user_id=p_customer_id AND u.role='customer' AND u.is_active AND cp.licence_expiry>=p_end::date) THEN RAISE EXCEPTION 'Customer not eligible: active account and valid licence required'; END IF;

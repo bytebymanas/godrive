@@ -1559,7 +1559,18 @@ function Staff() {
     loadData();
   }, []);
 
-  if (user && user.role === 'customer') {
+  if (!user) {
+    return (
+      <main className="page">
+        <div className="notice" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Staff authentication required. Sign in as a staff member or administrator to operate the dispatch board.</span>
+          <Link to="/login" className="btn-primary btn-sm">Log in as Staff</Link>
+        </div>
+      </main>
+    );
+  }
+
+  if (user.role === 'customer') {
     return <main className="page"><div className="notice">Staff access only. Customers cannot access operational consoles.</div></main>;
   }
 
@@ -1616,9 +1627,22 @@ function Staff() {
 
   return (
     <main className="page">
-      <div className="eyebrow">BRANCH OPERATIONS DESK</div>
-      <h1>Staff Operations Board</h1>
-      <p className="muted">Manage customer handovers, vehicle return check-ins, and track overdue rentals.</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
+        <div>
+          <div className="eyebrow">BRANCH OPERATIONS DESK</div>
+          <h1>Staff Operations Board</h1>
+          <p className="muted">Live vehicle handovers, return check-in with odometer/damage capture, and overdue fleet tracking.</p>
+        </div>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <div style={{ background: '#eef8f3', color: '#166534', padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e', display: 'inline-block' }}></span>
+            Operations Online · {user.full_name} ({user.role})
+          </div>
+          <button onClick={loadData} className="btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh Board
+          </button>
+        </div>
+      </div>
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '8px', margin: '24px 0 20px' }}>
@@ -1626,13 +1650,13 @@ function Staff() {
           onClick={() => setTab('pickups')}
           className={`tab-btn ${tab === 'pickups' ? 'active' : ''}`}
         >
-          Today's Pickups ({pickups.length})
+          Pickups for Handover ({pickups.length})
         </button>
         <button
           onClick={() => setTab('returns')}
           className={`tab-btn ${tab === 'returns' ? 'active' : ''}`}
         >
-          Active Rentals / Returns ({activeRentals.length})
+          Active Rentals / In-Journey ({activeRentals.length})
         </button>
         <button
           onClick={() => setTab('overdue')}
@@ -1648,43 +1672,53 @@ function Staff() {
       ) : tab === 'pickups' ? (
         <div>
           {!pickups.length ? (
-            <div className="empty">No vehicle handovers scheduled for today. All clear!</div>
+            <div className="empty">No confirmed customer vehicle handovers waiting. All clear!</div>
           ) : (
             <div className="booking-list">
-              {pickups.map(p => (
-                <div className="booking" key={p.booking_id}>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                      <span className="chip chip-staff">SCHEDULED PICKUP</span>
-                      <span style={{ fontSize: '12px', color: '#748079' }}>Booking #{p.booking_id}</span>
+              {pickups.map(p => {
+                const isToday = p.timeline_status === 'today';
+                const isPast = p.timeline_status === 'past_due';
+                return (
+                  <div className="booking" key={p.booking_id}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                        {isToday ? (
+                          <span className="chip" style={{ background: '#dcfce7', color: '#166534', fontWeight: 700 }}>TODAY'S PICKUP</span>
+                        ) : isPast ? (
+                          <span className="chip" style={{ background: '#fee2e2', color: '#991b1b', fontWeight: 700 }}>PAST DUE PICKUP</span>
+                        ) : (
+                          <span className="chip" style={{ background: '#fef3c7', color: '#92400e', fontWeight: 600 }}>SCHEDULED PICKUP</span>
+                        )}
+                        <span style={{ fontSize: '12px', color: '#748079' }}>Booking #{p.booking_id}</span>
+                      </div>
+                      <h3 style={{ margin: '3px 0' }}>{p.make} {p.model} ({p.reg_number})</h3>
+                      <p style={{ margin: '2px 0', fontSize: '13px' }}>
+                        Customer: <b>{p.customer_name}</b> · <Phone size={13} style={{ display: 'inline', verticalAlign: '-2px' }} /> {p.customer_phone}
+                      </p>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#748079' }}>
+                        Rental Period: {parsePeriod(p.period).formatted}
+                      </p>
                     </div>
-                    <h3 style={{ margin: '3px 0' }}>{p.make} {p.model} ({p.reg_number})</h3>
-                    <p style={{ margin: '2px 0', fontSize: '13px' }}>
-                      Customer: <b>{p.customer_name}</b> · <Phone size={13} style={{ display: 'inline', verticalAlign: '-2px' }} /> {p.customer_phone}
-                    </p>
-                    <p style={{ margin: 0, fontSize: '12px', color: '#748079' }}>
-                      Rental Period: {parsePeriod(p.period).formatted}
-                    </p>
-                  </div>
 
-                  <button
-                    onClick={() => {
-                      setHandoverBooking(p);
-                      setOdometerOut('25000');
-                    }}
-                    className="btn-primary"
-                  >
-                    Hand Over Vehicle →
-                  </button>
-                </div>
-              ))}
+                    <button
+                      onClick={() => {
+                        setHandoverBooking(p);
+                        setOdometerOut('15000');
+                      }}
+                      className="btn-primary"
+                    >
+                      Hand Over Vehicle →
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
       ) : tab === 'returns' ? (
         <div>
           {!activeRentals.length ? (
-            <div className="empty">No active rentals awaiting return today.</div>
+            <div className="empty">No active rentals awaiting return check-in.</div>
           ) : (
             <div className="booking-list">
               {activeRentals.map(r => (
@@ -1699,14 +1733,14 @@ function Staff() {
                       Customer: <b>{r.customer_name}</b> · {r.customer_phone}
                     </p>
                     <p style={{ margin: 0, fontSize: '12px', color: '#748079' }}>
-                      Odometer at departure: <b>{r.odometer_out} km</b> · Dispatched: {r.pickup_at ? new Date(r.pickup_at).toLocaleString() : 'Today'}
+                      Odometer at departure: <b>{r.odometer_out} km</b> · Dispatched: {r.pickup_at ? new Date(r.pickup_at).toLocaleString() : 'Active'}
                     </p>
                   </div>
 
                   <button
                     onClick={() => {
                       setReturnRental(r);
-                      setOdometerIn(String((r.odometer_out || 25000) + 150));
+                      setOdometerIn(String((Number(r.odometer_out) || 15000) + 120));
                       setDamageDescription('');
                       setDamageFine('');
                     }}
@@ -1880,61 +1914,155 @@ function Admin() {
   const [topCustomers, setTopCustomers] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [staffHandovers, setStaffHandovers] = useState([]);
+  const [adminStats, setAdminStats] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadDashboard = () => {
+    setRefreshing(true);
+    Promise.all([
+      api('/admin/stats').catch(() => null),
+      api('/admin/reports/categories').catch(() => []),
+      api('/admin/reports/revenue').catch(() => []),
+      api('/admin/reports/customers').catch(() => []),
+      api('/admin/vehicles').catch(() => []),
+      api('/staff/today').catch(() => []),
+    ])
+      .then(([stats, cats, rev, custs, vehs, handovers]) => {
+        if (stats) setAdminStats(stats);
+        if (Array.isArray(cats)) setCategories(cats);
+        if (Array.isArray(rev)) setRevenueData(rev);
+        if (Array.isArray(custs)) setTopCustomers(custs);
+        if (Array.isArray(vehs)) setVehicles(vehs);
+        if (Array.isArray(handovers)) setStaffHandovers(handovers);
+      })
+      .finally(() => setRefreshing(false));
+  };
 
   useEffect(() => {
-    api('/admin/reports/categories').then(setCategories).catch(() => {});
-    api('/admin/reports/revenue').then(setRevenueData).catch(() => {});
-    api('/admin/reports/customers').then(setTopCustomers).catch(() => {});
-    api('/admin/vehicles').then(setVehicles).catch(() => {});
-    api('/staff/today').then(setStaffHandovers).catch(() => {});
+    loadDashboard();
   }, []);
 
-  if (user && user.role !== 'admin') {
+  if (!user) {
+    return (
+      <main className="page">
+        <div className="notice" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Administrator authentication required to access executive consoles.</span>
+          <Link to="/login" className="btn-primary btn-sm">Log in as Admin</Link>
+        </div>
+      </main>
+    );
+  }
+
+  if (user.role !== 'admin') {
     return <main className="page"><div className="notice">Admin credentials required.</div></main>;
   }
 
-  const totalRevenue = revenueData.reduce((acc, r) => acc + (Number(r.net_revenue) || 0), 0);
-  const activeRentalsCount = staffHandovers.filter(h => h.rental_id && !h.return_at).length;
-  const totalBookingsCount = categories.reduce((acc, c) => acc + (Number(c.rentals) || 0), 0);
+  const totalRevenue = adminStats?.revenue?.net_revenue
+    ? Number(adminStats.revenue.net_revenue)
+    : revenueData.reduce((acc, r) => acc + (Number(r.net_revenue) || 0), 0);
+
+  const totalBookingsCount = adminStats?.bookings?.total_bookings
+    ? Number(adminStats.bookings.total_bookings)
+    : categories.reduce((acc, c) => acc + (Number(c.rentals) || 0), 0);
+
+  const activeRentalsCount = adminStats?.active_rentals !== undefined
+    ? adminStats.active_rentals
+    : staffHandovers.filter(h => h.rental_id && !h.return_at).length;
 
   return (
     <main className="page">
       <AdminNav />
 
-      <div className="eyebrow">EXECUTIVE INTELLIGENCE</div>
-      <h1>Good day, {user?.full_name || 'Admin'}</h1>
-      <p className="muted">Real-time fleet performance, financial reports, and platform health.</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '20px' }}>
+        <div>
+          <div className="eyebrow">EXECUTIVE INTELLIGENCE & ADBMS GOVERNANCE</div>
+          <h1>Good day, {user?.full_name || 'Admin'}</h1>
+          <p className="muted">Live fleet performance, real-time customer mutations, and financial audit reports.</p>
+        </div>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <div style={{ background: '#eef8f3', color: '#166534', padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e', display: 'inline-block' }}></span>
+            PostgreSQL Connected · rental_db
+          </div>
+          <button
+            onClick={loadDashboard}
+            disabled={refreshing}
+            className="btn-secondary btn-sm"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
+            {refreshing ? 'Syncing…' : 'Refresh Metrics'}
+          </button>
+        </div>
+      </div>
 
       {/* KPI Cards */}
       <div className="stats" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
         <div className="stat">
-          <span>Total Completed Bookings</span>
-          <b>{totalBookingsCount || 48}</b>
-          <small>Across all branches</small>
+          <span>Total Bookings (All-Time)</span>
+          <b>{totalBookingsCount}</b>
+          <small>{adminStats?.bookings?.confirmed_bookings || 0} confirmed · {adminStats?.bookings?.completed_bookings || 0} completed</small>
         </div>
 
         <div className="stat">
-          <span>Net Revenue (Ledger)</span>
-          <b style={{ color: '#176b5b' }}>{money(totalRevenue || 185000)}</b>
-          <small>PostgreSQL audit verified</small>
+          <span>Net Revenue (Payments Ledger)</span>
+          <b style={{ color: '#176b5b' }}>{money(totalRevenue)}</b>
+          <small>Refunds deducted: {money(adminStats?.revenue?.total_refunded || 0)}</small>
         </div>
 
         <div className="stat">
           <span>Active Rentals on Road</span>
           <b>{activeRentalsCount}</b>
-          <small>Currently dispatched</small>
+          <small>{adminStats?.fleet?.rented_vehicles || 0} vehicles currently dispatched</small>
         </div>
 
         <div className="stat">
-          <span>Fleet Size</span>
-          <b>{vehicles.length || 30}</b>
-          <small>Cars in registry</small>
+          <span>Total Fleet Size</span>
+          <b>{adminStats?.fleet?.total_vehicles || vehicles.length || 30}</b>
+          <small>{adminStats?.fleet?.available_vehicles || 0} available for booking</small>
         </div>
       </div>
 
+      {/* Live Recent Customer Bookings Feed */}
+      {adminStats?.recent_bookings?.length > 0 && (
+        <div className="panel" style={{ marginBottom: '28px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+            <h2 style={{ fontSize: '18px', margin: 0 }}>Live Customer Activity (Recent Bookings)</h2>
+            <small style={{ color: '#748079' }}>Updates automatically as customers book</small>
+          </div>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Booking #</th>
+                <th>Customer</th>
+                <th>Vehicle</th>
+                <th>Period</th>
+                <th>Total Amount</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {adminStats.recent_bookings.map(b => (
+                <tr key={b.booking_id}>
+                  <td><b>#{b.booking_id}</b></td>
+                  <td>
+                    <b>{b.customer_name}</b><br />
+                    <small style={{ color: '#748079' }}>{b.customer_email}</small>
+                  </td>
+                  <td>{b.make} {b.model} ({b.reg_number})</td>
+                  <td style={{ fontSize: '12px' }}>{parsePeriod(b.period).formatted}</td>
+                  <td style={{ fontWeight: 700, color: '#176b5b' }}>{money(b.total_amount)}</td>
+                  <td><StatusChip status={b.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* Revenue Over Time Chart */}
       <div className="panel chart" style={{ marginBottom: '28px' }}>
-        <h2 style={{ fontSize: '20px', marginBottom: '16px' }}>Monthly Revenue Overview</h2>
+        <h2 style={{ fontSize: '20px', marginBottom: '16px' }}>Monthly Revenue Overview (Materialized View)</h2>
         {revenueData.length > 0 ? (
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={revenueData} margin={{ top: 10, right: 20, left: 20, bottom: 0 }}>
@@ -1953,7 +2081,7 @@ function Admin() {
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px' }}>
         {/* Top Customers Report */}
         <div className="panel" style={{ margin: 0 }}>
-          <h2 style={{ fontSize: '19px', marginTop: 0 }}>Top Customers (Loyalty)</h2>
+          <h2 style={{ fontSize: '19px', marginTop: 0 }}>Top Customers (Net Spend)</h2>
           <table className="data-table">
             <thead>
               <tr>
@@ -1969,8 +2097,8 @@ function Admin() {
                     <b>{c.full_name}</b><br />
                     <small style={{ color: '#748079' }}>{c.email}</small>
                   </td>
-                  <td>{c.booking_count || c.rentals || 1}</td>
-                  <td style={{ fontWeight: 700, color: '#176b5b' }}>{money(c.total_spent || c.revenue)}</td>
+                  <td><b>{c.bookings || c.booking_count || 1}</b></td>
+                  <td style={{ fontWeight: 700, color: '#176b5b' }}>{money(c.net_spend || c.total_spent || c.revenue)}</td>
                 </tr>
               ))}
             </tbody>
@@ -2929,14 +3057,30 @@ function AuditLog() {
   const [filterTable, setFilterTable] = useState('all');
   const [expandedLogId, setExpandedLogId] = useState(null);
 
-  useEffect(() => {
+  const fetchLogs = () => {
+    setLoading(true);
     api('/admin/audit')
       .then(setLogs)
       .catch(e => toast.error(e.message))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchLogs();
   }, []);
 
-  if (user && user.role !== 'admin') {
+  if (!user) {
+    return (
+      <main className="page">
+        <div className="notice" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Administrator sign-in required to inspect system audit trail.</span>
+          <Link to="/login" className="btn-primary btn-sm">Log in as Admin</Link>
+        </div>
+      </main>
+    );
+  }
+
+  if (user.role !== 'admin') {
     return <main className="page"><div className="notice">Admin credentials required.</div></main>;
   }
 
@@ -2950,9 +3094,22 @@ function AuditLog() {
     <main className="page">
       <AdminNav />
 
-      <div className="eyebrow">SYSTEM GOVERNANCE & ADBMS LOGS</div>
-      <h1>Audit Trail</h1>
-      <p className="muted">Database-level trigger logs recording all state modifications with actor tracking.</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+        <div>
+          <div className="eyebrow">SYSTEM GOVERNANCE & ADBMS LOGS</div>
+          <h1>Audit Trail & Trigger Journal</h1>
+          <p className="muted">PostgreSQL trigger-recorded mutations showing before/after snapshots and exact actor tracking.</p>
+        </div>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <div style={{ background: '#eef8f3', color: '#166534', padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e', display: 'inline-block' }}></span>
+            Audit System Connected
+          </div>
+          <button onClick={fetchLogs} className="btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <RefreshCw size={14} /> Refresh Logs
+          </button>
+        </div>
+      </div>
 
       <div style={{ display: 'flex', gap: '12px', background: '#f8faf9', padding: '14px', borderRadius: '12px', border: '1px solid #edf0ee', margin: '20px 0' }}>
         <span style={{ fontSize: '13px', fontWeight: 600, color: '#65716d', alignSelf: 'center' }}>FILTER TABLE:</span>
@@ -2960,20 +3117,21 @@ function AuditLog() {
           value={filterTable}
           onChange={e => setFilterTable(e.target.value)}
           className="input-field"
-          style={{ width: '200px' }}
+          style={{ width: '220px' }}
         >
-          <option value="all">All Tables (Recent 500)</option>
-          <option value="bookings">bookings</option>
-          <option value="rentals">rentals</option>
-          <option value="payments">payments</option>
-          <option value="vehicles">vehicles</option>
-          <option value="users">users</option>
-          <option value="reviews">reviews</option>
+          <option value="all">All Tables ({logs.length} entries)</option>
+          <option value="bookings">bookings (reservations)</option>
+          <option value="rentals">rentals (handovers & returns)</option>
+          <option value="vehicles">vehicles (fleet updates)</option>
+          <option value="users">users (accounts & statuses)</option>
+          <option value="payments">payments (transactions & refunds)</option>
+          <option value="damage_reports">damage_reports (fines)</option>
+          <option value="reviews">reviews (ratings)</option>
         </select>
       </div>
 
       {loading ? (
-        <div className="loading">Reading audit journal…</div>
+        <div className="loading">Reading audit journal from PostgreSQL…</div>
       ) : !filteredLogs.length ? (
         <div className="empty">No audit entries matching filter.</div>
       ) : (
@@ -2984,31 +3142,45 @@ function AuditLog() {
               <th>Table</th>
               <th>Action</th>
               <th>Record ID</th>
-              <th>Actor User ID</th>
+              <th>Changed By (Actor)</th>
               <th>Payload Details</th>
             </tr>
           </thead>
           <tbody>
             {filteredLogs.map(l => {
-              const isExpanded = expandedLogId === l.log_id;
+              const isExpanded = expandedLogId === l.audit_id;
               return (
-                <React.Fragment key={l.log_id}>
+                <React.Fragment key={l.audit_id}>
                   <tr>
                     <td style={{ fontSize: '12px', whiteSpace: 'nowrap' }}>
                       {new Date(l.changed_at).toLocaleString()}
                     </td>
                     <td><code style={{ background: '#f2f6f4', padding: '2px 6px', borderRadius: '4px' }}>{l.table_name}</code></td>
                     <td><ActionChip action={l.action} /></td>
-                    <td>#{l.record_id}</td>
-                    <td>User #{l.changed_by || 'SYSTEM'}</td>
+                    <td><b>#{l.record_id}</b></td>
+                    <td>
+                      {l.actor_name ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontWeight: 600 }}>{l.actor_name}</span>
+                          <span className={`chip chip-${l.actor_role || 'staff'}`} style={{ textTransform: 'capitalize' }}>
+                            {l.actor_role}
+                          </span>
+                          <small style={{ color: '#748079' }}>#{l.changed_by}</small>
+                        </div>
+                      ) : (
+                        <span className="chip" style={{ background: '#f1f5f9', color: '#64748b', fontSize: '11px' }}>
+                          System / Initial Seed
+                        </span>
+                      )}
+                    </td>
                     <td>
                       <button
-                        onClick={() => toggleExpand(l.log_id)}
+                        onClick={() => toggleExpand(l.audit_id)}
                         className="btn-secondary btn-sm"
                         style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
                       >
                         {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                        {isExpanded ? 'Hide' : 'Inspect Data'}
+                        {isExpanded ? 'Hide' : 'Inspect JSON'}
                       </button>
                     </td>
                   </tr>
@@ -3019,13 +3191,13 @@ function AuditLog() {
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                           <div>
                             <span style={{ fontSize: '11px', fontWeight: 700, color: '#b44e4e' }}>PREVIOUS STATE (OLD DATA)</span>
-                            <pre style={{ background: '#fff', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8e5', fontSize: '11px', overflowX: 'auto', maxHeight: '200px' }}>
+                            <pre style={{ background: '#fff', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8e5', fontSize: '11px', overflowX: 'auto', maxHeight: '240px' }}>
                               {l.old_data ? JSON.stringify(l.old_data, null, 2) : '(none / INSERT)'}
                             </pre>
                           </div>
                           <div>
                             <span style={{ fontSize: '11px', fontWeight: 700, color: '#30874a' }}>NEW COMMITTED STATE (NEW DATA)</span>
-                            <pre style={{ background: '#fff', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8e5', fontSize: '11px', overflowX: 'auto', maxHeight: '200px' }}>
+                            <pre style={{ background: '#fff', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8e5', fontSize: '11px', overflowX: 'auto', maxHeight: '240px' }}>
                               {l.new_data ? JSON.stringify(l.new_data, null, 2) : '(none / DELETE)'}
                             </pre>
                           </div>

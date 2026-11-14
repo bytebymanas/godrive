@@ -136,7 +136,10 @@ app.post('/api/auth/signup', wrap(async (req, res) => {
 
     await client.query('COMMIT');
     req.session.user = newUser;
-    res.status(201).json({ user: newUser });
+    req.session.save(err => {
+      if (err) return res.status(500).json({ error: 'Session save failed' });
+      res.status(201).json({ user: newUser });
+    });
   } catch (e) {
     await client.query('ROLLBACK');
     if (e.code === '23505') {
@@ -149,7 +152,7 @@ app.post('/api/auth/signup', wrap(async (req, res) => {
 }));
 
 // POST /api/auth/login
-app.post('/api/auth/login', loginLimit, wrap(async (req, res) => {
+app.post('/api/auth/login', loginLimit, wrap(async (req, res, next) => {
   const schema = z.object({
     email: z.string().email(),
     password: z.string(),
@@ -172,7 +175,10 @@ app.post('/api/auth/login', loginLimit, wrap(async (req, res) => {
     role: u.role,
   };
   req.session.user = safeUser;
-  res.json({ user: safeUser });
+  req.session.save(err => {
+    if (err) return next(err);
+    res.json({ user: safeUser });
+  });
 }));
 
 // POST /api/auth/logout
@@ -414,7 +420,7 @@ app.post('/api/bookings/:id/review', requireAuth, requireRole('customer'), wrap(
 // 4. STAFF OPERATIONS ROUTES
 // ==========================================
 
-// GET /api/staff/today (shows confirmed bookings for today's pickup + active rentals)
+// GET /api/staff/today (shows confirmed bookings for pickup + active rentals on the road)
 app.get('/api/staff/today', requireAuth, requireRole('staff', 'admin'), wrap(async (req, res) => {
   const q = await pool.query(`
     SELECT
@@ -429,7 +435,14 @@ app.get('/api/staff/today', requireAuth, requireRole('staff', 'admin'), wrap(asy
       v.reg_number,
       u.full_name AS customer_name,
       u.phone AS customer_phone,
+      u.email AS customer_email,
       CASE WHEN r.rental_id IS NULL THEN 'pickup' ELSE 'return' END AS handover_type,
+      CASE
+        WHEN r.rental_id IS NOT NULL AND r.return_at IS NULL THEN 'active_rental'
+        WHEN lower(b.period)::date = CURRENT_DATE THEN 'today'
+        WHEN lower(b.period)::date < CURRENT_DATE THEN 'past_due'
+        ELSE 'upcoming'
+      END AS timeline_status,
       r.pickup_at,
       r.odometer_out,
       r.return_at,
@@ -438,9 +451,11 @@ app.get('/api/staff/today', requireAuth, requireRole('staff', 'admin'), wrap(asy
     JOIN vehicles v USING (vehicle_id)
     JOIN users u ON u.user_id = b.customer_id
     LEFT JOIN rentals r USING (booking_id)
-    WHERE (b.status = 'confirmed' AND lower(b.period)::date <= CURRENT_DATE)
+    WHERE b.status = 'confirmed'
        OR (r.rental_id IS NOT NULL AND r.return_at IS NULL)
-    ORDER BY lower(b.period) ASC
+    ORDER BY
+      CASE WHEN lower(b.period)::date = CURRENT_DATE THEN 0 ELSE 1 END,
+      lower(b.period) ASC
   `);
   res.json(q.rows);
 }));
@@ -759,6 +774,74 @@ app.post('/api/admin/maintenance', requireAuth, requireRole('admin'), wrap(async
   res.status(201).json(q.rows[0]);
 }));
 
+// GET /api/admin/stats (live system dashboard metrics)
+app.get('/api/admin/stats', requireAuth, requireRole('admin'), wrap(async (req, res) => {
+  try {
+    await pool.query('REFRESH MATERIALIZED VIEW mv_monthly_revenue');
+  } catch (err) {}
+
+  const [bookingStats, revenueStats, activeRentals, fleetStats, recentBookings, latestAudit] = await Promise.all([
+    pool.query(`
+      SELECT
+        COUNT(*) AS total_bookings,
+        COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed_bookings,
+        COUNT(*) FILTER (WHERE status = 'active') AS active_bookings,
+        COUNT(*) FILTER (WHERE status = 'completed') AS completed_bookings,
+        COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled_bookings
+      FROM bookings
+    `),
+    pool.query(`
+      SELECT
+        COALESCE(SUM(CASE status WHEN 'paid' THEN amount WHEN 'refunded' THEN -amount ELSE 0 END), 0) AS net_revenue,
+        COALESCE(SUM(CASE status WHEN 'paid' THEN amount ELSE 0 END), 0) AS gross_paid,
+        COALESCE(SUM(CASE status WHEN 'refunded' THEN amount ELSE 0 END), 0) AS total_refunded
+      FROM payments
+    `),
+    pool.query(`
+      SELECT COUNT(*) AS active_count
+      FROM rentals
+      WHERE return_at IS NULL
+    `),
+    pool.query(`
+      SELECT
+        COUNT(*) AS total_vehicles,
+        COUNT(*) FILTER (WHERE status = 'available') AS available_vehicles,
+        COUNT(*) FILTER (WHERE status = 'rented') AS rented_vehicles,
+        COUNT(*) FILTER (WHERE status = 'maintenance') AS maintenance_vehicles
+      FROM vehicles
+    `),
+    pool.query(`
+      SELECT b.booking_id, b.status, b.period, b.total_amount, b.created_at,
+             v.reg_number, v.make, v.model,
+             u.full_name AS customer_name, u.email AS customer_email
+      FROM bookings b
+      JOIN vehicles v USING (vehicle_id)
+      JOIN users u ON u.user_id = b.customer_id
+      ORDER BY b.created_at DESC
+      LIMIT 6
+    `),
+    pool.query(`
+      SELECT a.audit_id, a.table_name, a.record_id, a.action, a.changed_at,
+             u.full_name AS actor_name, u.role AS actor_role
+      FROM audit_log a
+      LEFT JOIN users u ON u.user_id = a.changed_by
+      ORDER BY a.audit_id DESC
+      LIMIT 1
+    `)
+  ]);
+
+  res.json({
+    system_connected: true,
+    db_timestamp: new Date().toISOString(),
+    bookings: bookingStats.rows[0],
+    revenue: revenueStats.rows[0],
+    active_rentals: Number(activeRentals.rows[0]?.active_count || 0),
+    fleet: fleetStats.rows[0],
+    recent_bookings: recentBookings.rows,
+    latest_audit: latestAudit.rows[0] || null,
+  });
+}));
+
 // GET /api/admin/reports/never-booked
 app.get('/api/admin/reports/never-booked', requireAuth, requireRole('admin'), wrap(async (req, res) => {
   const q = await pool.query('SELECT * FROM v_never_booked');
@@ -767,6 +850,11 @@ app.get('/api/admin/reports/never-booked', requireAuth, requireRole('admin'), wr
 
 // GET /api/admin/reports/:name
 app.get('/api/admin/reports/:name', requireAuth, requireRole('admin'), wrap(async (req, res) => {
+  if (req.params.name === 'revenue') {
+    try {
+      await pool.query('REFRESH MATERIALIZED VIEW mv_monthly_revenue');
+    } catch (err) {}
+  }
   const views = {
     customers: 'v_top_customers',
     categories: 'v_category_revenue',
@@ -783,9 +871,26 @@ app.get('/api/admin/reports/:name', requireAuth, requireRole('admin'), wrap(asyn
   res.json(q.rows);
 }));
 
-// GET /api/admin/audit
+// GET /api/admin/audit (with actor name & role joined)
 app.get('/api/admin/audit', requireAuth, requireRole('admin'), wrap(async (req, res) => {
-  const q = await pool.query('SELECT * FROM audit_log ORDER BY changed_at DESC LIMIT 500');
+  const q = await pool.query(`
+    SELECT
+      a.audit_id,
+      a.table_name,
+      a.record_id,
+      a.action,
+      a.old_data,
+      a.new_data,
+      a.changed_by,
+      a.changed_at,
+      u.full_name AS actor_name,
+      u.email AS actor_email,
+      u.role AS actor_role
+    FROM audit_log a
+    LEFT JOIN users u ON u.user_id = a.changed_by
+    ORDER BY a.audit_id DESC
+    LIMIT 500
+  `);
   res.json(q.rows);
 }));
 
