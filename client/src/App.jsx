@@ -1221,11 +1221,30 @@ function MyBookings() {
                     <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#748079' }}>
                       Pick-up: {b.pickup_branch} → Return: {b.drop_branch}
                     </p>
+                    {Number(b.total_fine) > 0 && (
+                      <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#fdf2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '3px 8px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, width: 'fit-content' }}>
+                          ⚠️ Damage / Penalty Fine: {money(b.total_fine)}
+                        </span>
+                        {b.damage_reports && b.damage_reports.length > 0 && (
+                          <span style={{ fontSize: '11px', color: '#991b1b', fontStyle: 'italic', paddingLeft: '4px' }}>
+                            Reason: {b.damage_reports[0].description}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <b style={{ fontSize: '19px', color: '#17212b' }}>{money(b.total_amount)}</b>
+                  <div style={{ textAlign: 'right' }}>
+                    <b style={{ fontSize: '19px', color: '#17212b', display: 'block' }}>{money(b.total_amount)}</b>
+                    {Number(b.total_fine) > 0 && (
+                      <span style={{ fontSize: '11px', color: '#b91c1c', fontWeight: 500, display: 'block' }}>
+                        (Base: {money(Number(b.total_amount) - Number(b.total_fine))} + Fine: {money(b.total_fine)})
+                      </span>
+                    )}
+                  </div>
 
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button
@@ -1349,7 +1368,15 @@ function MyBookings() {
             <div style={{ background: '#f8faf9', padding: '14px', borderRadius: '10px', border: '1px solid #e7ece9' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '13px' }}>
                 <div><b>Period:</b><br />{parsePeriod(selectedBookingDetail.period).formatted}</div>
-                <div><b>Total Paid:</b><br /><span style={{ color: '#176b5b', fontWeight: 700, fontSize: '16px' }}>{money(selectedBookingDetail.total_amount)}</span></div>
+                <div>
+                  <b>Total Settled:</b><br />
+                  <span style={{ color: '#176b5b', fontWeight: 700, fontSize: '16px' }}>{money(selectedBookingDetail.total_amount)}</span>
+                  {Number(selectedBookingDetail.rental?.total_fine || 0) > 0 && (
+                    <span style={{ display: 'block', fontSize: '11px', color: '#b91c1c', marginTop: '2px' }}>
+                      Base: {money(Number(selectedBookingDetail.total_amount) - Number(selectedBookingDetail.rental.total_fine))} + Fine: {money(selectedBookingDetail.rental.total_fine)}
+                    </span>
+                  )}
+                </div>
                 <div><b>Pick-up Branch:</b><br />{selectedBookingDetail.pickup_branch_name} ({selectedBookingDetail.pickup_city})</div>
                 <div><b>Return Branch:</b><br />{selectedBookingDetail.drop_branch_name} ({selectedBookingDetail.drop_city})</div>
               </div>
@@ -1377,6 +1404,30 @@ function MyBookings() {
                   <div>Odometer at Return: <b>{selectedBookingDetail.rental.odometer_in ? `${selectedBookingDetail.rental.odometer_in} km` : 'In Journey'}</b></div>
                   <div>Handed out: {new Date(selectedBookingDetail.rental.pickup_at).toLocaleString()}</div>
                   <div>Returned: {selectedBookingDetail.rental.return_at ? new Date(selectedBookingDetail.rental.return_at).toLocaleString() : 'Active'}</div>
+                </div>
+              </div>
+            )}
+
+            {selectedBookingDetail.rental?.damage_reports?.length > 0 && (
+              <div style={{ background: '#fef2f2', padding: '14px', borderRadius: '10px', border: '1px solid #fecaca' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <b style={{ fontSize: '13px', color: '#991b1b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <AlertTriangle size={15} /> DAMAGE ASSESSMENT & PENALTY INCIDENTS
+                  </b>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#b91c1c' }}>
+                    Total Fine: {money(selectedBookingDetail.rental.total_fine)}
+                  </span>
+                </div>
+                <div style={{ display: 'grid', gap: '6px' }}>
+                  {selectedBookingDetail.rental.damage_reports.map((dr, i) => (
+                    <div key={i} style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '6px', border: '1px solid #fee2e2', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, color: '#374151' }}>{dr.description}</div>
+                        <div style={{ fontSize: '11px', color: '#9ca3af' }}>{new Date(dr.created_at).toLocaleString()}</div>
+                      </div>
+                      <b style={{ color: '#dc2626' }}>+{money(dr.amount)}</b>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -1606,8 +1657,8 @@ function Staff() {
       const payload = {
         odometer_in: Number(odometerIn),
       };
-      if (damageDescription.trim()) {
-        payload.damage = damageDescription.trim();
+      if (damageDescription.trim() || Number(damageFine) > 0) {
+        payload.damage = damageDescription.trim() || 'Vehicle return penalty / incident';
         payload.fine = Number(damageFine) || 0;
       }
       await api(`/rentals/${returnRental.rental_id}/return`, {
@@ -1875,21 +1926,22 @@ function Staff() {
                 />
               </div>
 
-              {damageDescription.trim() && (
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: 600, color: '#65716d', display: 'block', marginBottom: '6px' }}>
-                    DAMAGE ASSESSMENT FINE (₹)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={damageFine}
-                    onChange={e => setDamageFine(e.target.value)}
-                    className="input-field"
-                    placeholder="e.g. 2500"
-                  />
-                </div>
-              )}
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: '#65716d', display: 'block', marginBottom: '6px' }}>
+                  DAMAGE / PENALTY FINE (₹) (OPTIONAL)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={damageFine}
+                  onChange={e => setDamageFine(e.target.value)}
+                  className="input-field"
+                  placeholder="e.g. 2500"
+                />
+                <small style={{ color: '#748079', fontSize: '11px', marginTop: '4px', display: 'block' }}>
+                  Entering a fine records a ledger charge in PostgreSQL, updates total booking amount, and records in database audit & damage report tables.
+                </small>
+              </div>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
@@ -1914,6 +1966,7 @@ function Admin() {
   const [topCustomers, setTopCustomers] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [staffHandovers, setStaffHandovers] = useState([]);
+  const [damageReports, setDamageReports] = useState([]);
   const [adminStats, setAdminStats] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -1926,14 +1979,16 @@ function Admin() {
       api('/admin/reports/customers').catch(() => []),
       api('/admin/vehicles').catch(() => []),
       api('/staff/today').catch(() => []),
+      api('/admin/damage-reports').catch(() => []),
     ])
-      .then(([stats, cats, rev, custs, vehs, handovers]) => {
+      .then(([stats, cats, rev, custs, vehs, handovers, damages]) => {
         if (stats) setAdminStats(stats);
         if (Array.isArray(cats)) setCategories(cats);
         if (Array.isArray(rev)) setRevenueData(rev);
         if (Array.isArray(custs)) setTopCustomers(custs);
         if (Array.isArray(vehs)) setVehicles(vehs);
         if (Array.isArray(handovers)) setStaffHandovers(handovers);
+        if (Array.isArray(damages)) setDamageReports(damages);
       })
       .finally(() => setRefreshing(false));
   };
@@ -1997,7 +2052,7 @@ function Admin() {
       </div>
 
       {/* KPI Cards */}
-      <div className="stats" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+      <div className="stats" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
         <div className="stat">
           <span>Total Bookings (All-Time)</span>
           <b>{totalBookingsCount}</b>
@@ -2008,6 +2063,12 @@ function Admin() {
           <span>Net Revenue (Payments Ledger)</span>
           <b style={{ color: '#176b5b' }}>{money(totalRevenue)}</b>
           <small>Refunds deducted: {money(adminStats?.revenue?.total_refunded || 0)}</small>
+        </div>
+
+        <div className="stat">
+          <span>Fines & Penalties Collected</span>
+          <b style={{ color: '#b91c1c' }}>{money(adminStats?.fines?.total_fines || 0)}</b>
+          <small>{adminStats?.fines?.fine_count || damageReports.length || 0} incidents assessed</small>
         </div>
 
         <div className="stat">
@@ -2051,8 +2112,59 @@ function Admin() {
                   </td>
                   <td>{b.make} {b.model} ({b.reg_number})</td>
                   <td style={{ fontSize: '12px' }}>{parsePeriod(b.period).formatted}</td>
-                  <td style={{ fontWeight: 700, color: '#176b5b' }}>{money(b.total_amount)}</td>
+                  <td style={{ fontWeight: 700, color: '#176b5b' }}>
+                    {money(b.total_amount)}
+                    {Number(b.total_fine) > 0 && (
+                      <span style={{ display: 'block', fontSize: '11px', color: '#b91c1c', fontWeight: 600, marginTop: '2px' }}>
+                        ⚠️ +{money(b.total_fine)} fine {b.damage_description ? `(${b.damage_description})` : ''}
+                      </span>
+                    )}
+                  </td>
                   <td><StatusChip status={b.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Damage & Incident Reports Ledger */}
+      {damageReports.length > 0 && (
+        <div className="panel" style={{ marginBottom: '28px', borderLeft: '4px solid #ef4444' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+            <div>
+              <h2 style={{ fontSize: '18px', margin: 0, color: '#991b1b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertTriangle size={18} /> Damage Assessment & Penalty Reports Ledger
+              </h2>
+              <small style={{ color: '#748079' }}>Recorded during vehicle return check-in by branch staff</small>
+            </div>
+            <span style={{ fontSize: '13px', fontWeight: 700, color: '#b91c1c', background: '#fee2e2', padding: '4px 10px', borderRadius: '6px' }}>
+              Total Assessed: {money(damageReports.reduce((sum, d) => sum + Number(d.amount || 0), 0))}
+            </span>
+          </div>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Report #</th>
+                <th>Customer</th>
+                <th>Vehicle</th>
+                <th>Incident / Description</th>
+                <th>Fine Assessed</th>
+                <th>Recorded At</th>
+              </tr>
+            </thead>
+            <tbody>
+              {damageReports.map(dr => (
+                <tr key={dr.report_id}>
+                  <td><b>#{dr.report_id}</b> <small style={{ color: '#748079' }}>(Booking #{dr.booking_id})</small></td>
+                  <td>
+                    <b>{dr.customer_name}</b><br />
+                    <small style={{ color: '#748079' }}>{dr.customer_email} · {dr.customer_phone}</small>
+                  </td>
+                  <td><b>{dr.make} {dr.model}</b> <span style={{ color: '#748079' }}>({dr.reg_number})</span></td>
+                  <td style={{ color: '#374151', fontWeight: 500 }}>{dr.description}</td>
+                  <td style={{ fontWeight: 700, color: '#dc2626', fontSize: '14px' }}>+{money(dr.amount)}</td>
+                  <td style={{ fontSize: '12px', color: '#748079' }}>{new Date(dr.created_at).toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>
@@ -2938,6 +3050,8 @@ function UsersManager() {
               <th>Email</th>
               <th>Phone</th>
               <th>Role</th>
+              <th>Bookings</th>
+              <th>Damage Fines</th>
               <th>Status</th>
               <th>Joined</th>
               <th>Action</th>
@@ -2951,6 +3065,14 @@ function UsersManager() {
                 <td>{u.email}</td>
                 <td>{u.phone || '—'}</td>
                 <td><RoleChip role={u.role} /></td>
+                <td><b>{u.total_bookings || 0}</b></td>
+                <td>
+                  {Number(u.total_fines || 0) > 0 ? (
+                    <span style={{ color: '#dc2626', fontWeight: 700 }}>+{money(u.total_fines)}</span>
+                  ) : (
+                    <span style={{ color: '#9ca3af' }}>₹0</span>
+                  )}
+                </td>
                 <td>
                   <span className={`status ${u.is_active ? 'available' : 'cancelled'}`}>
                     {u.is_active ? 'Active' : 'Blocked'}

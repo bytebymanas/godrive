@@ -37,7 +37,7 @@ app.use(session({
 
 const loginLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 10,
+  limit: 500,
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -306,7 +306,24 @@ app.get('/api/bookings/mine', requireAuth, requireRole('customer'), wrap(async (
       v.reg_number,
       v.image_url,
       pb.name AS pickup_branch,
-      db.name AS drop_branch
+      db.name AS drop_branch,
+      COALESCE((
+        SELECT SUM(dr.amount)
+        FROM rentals r
+        JOIN damage_reports dr USING (rental_id)
+        WHERE r.booking_id = b.booking_id
+      ), 0) AS total_fine,
+      (
+        SELECT COALESCE(json_agg(json_build_object(
+          'report_id', dr.report_id,
+          'description', dr.description,
+          'amount', dr.amount,
+          'created_at', dr.created_at
+        )), '[]'::json)
+        FROM rentals r
+        JOIN damage_reports dr USING (rental_id)
+        WHERE r.booking_id = b.booking_id
+      ) AS damage_reports
     FROM bookings b
     JOIN vehicles v USING (vehicle_id)
     JOIN branches pb ON pb.branch_id = b.pickup_branch_id
@@ -350,7 +367,22 @@ app.get('/api/bookings/:id', requireAuth, wrap(async (req, res) => {
           'pickup_at', r.pickup_at,
           'return_at', r.return_at,
           'odometer_out', r.odometer_out,
-          'odometer_in', r.odometer_in
+          'odometer_in', r.odometer_in,
+          'total_fine', COALESCE((
+            SELECT SUM(dr.amount)
+            FROM damage_reports dr
+            WHERE dr.rental_id = r.rental_id
+          ), 0),
+          'damage_reports', (
+            SELECT COALESCE(json_agg(json_build_object(
+              'report_id', dr.report_id,
+              'description', dr.description,
+              'amount', dr.amount,
+              'created_at', dr.created_at
+            )), '[]'::json)
+            FROM damage_reports dr
+            WHERE dr.rental_id = r.rental_id
+          )
         )
         FROM rentals r
         WHERE r.booking_id = b.booking_id
@@ -483,7 +515,7 @@ app.post('/api/rentals', requireAuth, requireRole('staff', 'admin'), wrap(async 
   res.status(201).json(q.rows[0]);
 }));
 
-// PATCH /api/rentals/:id/return (vehicle return)
+// PATCH /api/rentals/:id/return (vehicle return & fine reconciliation)
 app.patch('/api/rentals/:id/return', requireAuth, requireRole('staff', 'admin'), wrap(async (req, res) => {
   const schema = z.object({
     odometer_in: z.coerce.number().int().nonnegative(),
@@ -502,11 +534,28 @@ app.patch('/api/rentals/:id/return', requireAuth, requireRole('staff', 'admin'),
       err.status = 404;
       throw err;
     }
-    if (parsed.damage) {
+    const rental = r.rows[0];
+    const fineAmount = Number(parsed.fine) || 0;
+    const damageDesc = (parsed.damage && parsed.damage.trim()) || (fineAmount > 0 ? 'Vehicle return penalty fee' : null);
+
+    if (damageDesc || fineAmount > 0) {
+      // 1. Record damage/penalty incident
       await c.query(
         'INSERT INTO damage_reports(rental_id, description, amount) VALUES($1, $2, $3)',
-        [req.params.id, parsed.damage, parsed.fine || 0]
+        [req.params.id, damageDesc || 'Vehicle return incident', fineAmount]
       );
+
+      // 2. Reconcile fine into booking total and payment ledger
+      if (fineAmount > 0) {
+        await c.query(
+          'UPDATE bookings SET total_amount = total_amount + $1 WHERE booking_id = $2',
+          [fineAmount, rental.booking_id]
+        );
+        await c.query(
+          'INSERT INTO payments(booking_id, amount, method, status, transaction_ref) VALUES($1, $2, $3, $4, $5)',
+          [rental.booking_id, fineAmount, 'cash', 'paid', 'FINE-' + Math.random().toString(36).substring(2, 9).toUpperCase()]
+        );
+      }
     }
     return r;
   });
@@ -519,9 +568,17 @@ app.patch('/api/rentals/:id/return', requireAuth, requireRole('staff', 'admin'),
 
 // GET /api/admin/users
 app.get('/api/admin/users', requireAuth, requireRole('admin'), wrap(async (req, res) => {
-  const q = await pool.query(
-    'SELECT user_id, full_name, email, phone, role, is_active, created_at FROM users ORDER BY user_id'
-  );
+  const q = await pool.query(`
+    SELECT u.user_id, u.full_name, u.email, u.phone, u.role, u.is_active, u.created_at,
+           COUNT(DISTINCT b.booking_id) AS total_bookings,
+           COALESCE(SUM(dr.amount), 0) AS total_fines
+    FROM users u
+    LEFT JOIN bookings b ON b.customer_id = u.user_id
+    LEFT JOIN rentals r ON r.booking_id = b.booking_id
+    LEFT JOIN damage_reports dr ON dr.rental_id = r.rental_id
+    GROUP BY u.user_id
+    ORDER BY u.user_id
+  `);
   res.json(q.rows);
 }));
 
@@ -780,7 +837,7 @@ app.get('/api/admin/stats', requireAuth, requireRole('admin'), wrap(async (req, 
     await pool.query('REFRESH MATERIALIZED VIEW mv_monthly_revenue');
   } catch (err) {}
 
-  const [bookingStats, revenueStats, activeRentals, fleetStats, recentBookings, latestAudit] = await Promise.all([
+  const [bookingStats, revenueStats, activeRentals, fleetStats, recentBookings, latestAudit, fineStats] = await Promise.all([
     pool.query(`
       SELECT
         COUNT(*) AS total_bookings,
@@ -813,12 +870,24 @@ app.get('/api/admin/stats', requireAuth, requireRole('admin'), wrap(async (req, 
     pool.query(`
       SELECT b.booking_id, b.status, b.period, b.total_amount, b.created_at,
              v.reg_number, v.make, v.model,
-             u.full_name AS customer_name, u.email AS customer_email
+             u.full_name AS customer_name, u.email AS customer_email,
+             COALESCE((
+               SELECT SUM(dr.amount)
+               FROM rentals r
+               JOIN damage_reports dr USING (rental_id)
+               WHERE r.booking_id = b.booking_id
+             ), 0) AS total_fine,
+             (
+               SELECT string_agg(dr.description, ', ')
+               FROM rentals r
+               JOIN damage_reports dr USING (rental_id)
+               WHERE r.booking_id = b.booking_id
+             ) AS damage_description
       FROM bookings b
       JOIN vehicles v USING (vehicle_id)
       JOIN users u ON u.user_id = b.customer_id
       ORDER BY b.created_at DESC
-      LIMIT 6
+      LIMIT 8
     `),
     pool.query(`
       SELECT a.audit_id, a.table_name, a.record_id, a.action, a.changed_at,
@@ -827,6 +896,12 @@ app.get('/api/admin/stats', requireAuth, requireRole('admin'), wrap(async (req, 
       LEFT JOIN users u ON u.user_id = a.changed_by
       ORDER BY a.audit_id DESC
       LIMIT 1
+    `),
+    pool.query(`
+      SELECT
+        COALESCE(SUM(amount), 0) AS total_fines,
+        COUNT(*) FILTER (WHERE amount > 0) AS fine_count
+      FROM damage_reports
     `)
   ]);
 
@@ -835,11 +910,30 @@ app.get('/api/admin/stats', requireAuth, requireRole('admin'), wrap(async (req, 
     db_timestamp: new Date().toISOString(),
     bookings: bookingStats.rows[0],
     revenue: revenueStats.rows[0],
+    fines: fineStats.rows[0],
     active_rentals: Number(activeRentals.rows[0]?.active_count || 0),
     fleet: fleetStats.rows[0],
     recent_bookings: recentBookings.rows,
     latest_audit: latestAudit.rows[0] || null,
   });
+}));
+
+// GET /api/admin/damage-reports
+app.get('/api/admin/damage-reports', requireAuth, requireRole('admin', 'staff'), wrap(async (req, res) => {
+  const q = await pool.query(`
+    SELECT dr.report_id, dr.rental_id, dr.description, dr.amount, dr.created_at,
+           b.booking_id, b.customer_id,
+           v.reg_number, v.make, v.model,
+           u.full_name AS customer_name, u.email AS customer_email, u.phone AS customer_phone,
+           r.odometer_out, r.odometer_in, r.return_at
+    FROM damage_reports dr
+    JOIN rentals r USING (rental_id)
+    JOIN bookings b USING (booking_id)
+    JOIN vehicles v USING (vehicle_id)
+    JOIN users u ON u.user_id = b.customer_id
+    ORDER BY dr.created_at DESC
+  `);
+  res.json(q.rows);
 }));
 
 // GET /api/admin/reports/never-booked

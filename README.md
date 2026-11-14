@@ -5,7 +5,7 @@
 
 ---
 
-## ADBMS Concepts Demonstrated
+## ADBMS Concepts Demonstrated      
 
 | Advanced DBMS Concept | PostgreSQL Feature / Technique | Implementation Source Code |
 |---|---|---|
