@@ -36,10 +36,11 @@
    - 6.12 Session Variables for Actor Tracking
    - 6.13 Database-Level Roles & Permissions
    - 6.14 Window Functions & Aggregations
+   - 6.15 Referential Integrity, Cascading Purge & Multi-Tier RBAC
 7. [API Endpoints Reference](#7-api-endpoints-reference)
 8. [User Roles & Access Control](#8-user-roles--access-control)
 9. [Key Business Flows with SQL](#9-key-business-flows-with-sql)
-10. [Viva Q&A — 25 Expected Questions with Model Answers](#10-viva-qa--25-expected-questions-with-model-answers)
+10. [Viva Q&A — 27 Expected Questions with Model Answers](#10-viva-qa--27-expected-questions-with-model-answers)
 11. [Sample SQL Queries](#11-sample-sql-queries)
 
 ---
@@ -1052,6 +1053,28 @@ FROM mv_monthly_revenue;
 
 ---
 
+### 6.15 Referential Integrity, Cascading Purge & Multi-Tier RBAC
+
+A classic ADBMS challenge in relational enterprise databases is safely deleting parent records when foreign keys with `RESTRICT` or `NO ACTION` reference them across multiple relational tables.
+
+In GoDrive, the `users` table is referenced by:
+- `customer_profiles(user_id)` → `ON DELETE CASCADE`
+- `bookings(customer_id)` → `REFERENCES users` (no cascade, protects financial ledger rows)
+- `rentals(handed_out_by)` → `NOT NULL REFERENCES users` (tracks staff vehicle dispatch)
+- `rentals(received_by)` → `REFERENCES users` (tracks staff vehicle return)
+
+#### Foreign Key Dependency Resolution Pattern
+When deleting a user, the system executes an atomic multi-step transaction wrapped with `withActor()`:
+
+1. **Staff Reassignment**: If the user was a staff member who dispatched vehicles (`handed_out_by`), those rows cannot be nullified due to the `NOT NULL` constraint. They are dynamically reassigned to the executing administrator's ID (`UPDATE rentals SET handed_out_by = $adminId WHERE handed_out_by = $targetId`). For vehicle returns (`received_by`), the field is safely set to `NULL`.
+2. **Cascading Child Cleanups**: For customers, all dependent payment transactions, reviews, damage reports, and booked extras are safely deleted before removing the parent `bookings` rows in reverse-dependency order.
+3. **Parent Deletion**: `DELETE FROM users WHERE user_id = $targetId` is executed, which triggers `trg_users_audit` to capture the complete `OLD` row as JSONB into `audit_log`.
+4. **Session Invalidation**: Active session records in the `session` table are purged to prevent unauthorized subsequent requests.
+
+This guarantees **Zero Orphaned Records** and **Zero Foreign Key Violations**, while maintaining complete historical integrity in the audit trail.
+
+---
+
 ## 7. API Endpoints Reference
 
 ### Authentication
@@ -1081,12 +1104,15 @@ FROM mv_monthly_revenue;
 | `POST` | `/api/staff/rentals` | Create rental (dispatch vehicle) |
 | `PUT` | `/api/staff/rentals/:id/return` | Record vehicle return + damage |
 
-### Admin
+### Admin & Super Admin
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/api/admin/stats` | Dashboard statistics |
-| `GET` | `/api/admin/users` | All users list |
-| `GET` | `/api/admin/audit` | Audit log |
+| `GET` | `/api/admin/users` | All users list with booking and fine metrics |
+| `POST` | `/api/admin/users` | Create new staff or admin user |
+| `PATCH` | `/api/admin/users/:id/status` | Activate or block user account |
+| `DELETE` | `/api/admin/users/:id` | Hierarchical user purge (Super Admin vs Admin rules) |
+| `GET` | `/api/admin/audit` | Audit log with actor tracking |
 | `GET` | `/api/admin/revenue` | Revenue by month (from materialized view) |
 | `GET` | `/api/admin/vehicles` | Full fleet management |
 | `POST` | `/api/admin/vehicles` | Add new vehicle |
@@ -1096,25 +1122,34 @@ FROM mv_monthly_revenue;
 ## 8. User Roles & Access Control
 
 ```mermaid
-flowchart LR
-    A["👤 Customer"] --> B["Browse Vehicles\nBook / Cancel\nView My Bookings\nLeave Review"]
-    C["👷 Staff"] --> D["View Active Rentals\nDispatch Vehicle\nRecord Return\nLog Damage Fine"]
-    E["🔑 Admin"] --> F["View All Users\nManage Fleet\nRevenue Dashboard\nAudit Trail\nAll above staff actions"]
+flowchart TD
+    SA["👑 Super Admin (Owner)\nmaanas@gmail.com"] -->|"Manage & Delete all\nAdmins, Staff & Customers"| AD["🛡️ Standard Administrator\ne.g. admin@example.com"]
+    AD -->|"Manage Fleet, Revenue,\nManage/Delete Staff & Customers"| ST["👷 Station Staff\ne.g. staff1@example.com"]
+    ST -->|"Vehicle Dispatch,\nReturns & Damage Fines"| CS["👤 Customer\ne.g. customer1@example.com"]
+    CS -->|"Browse Fleet,\nBook & Cancel"| DB[("🗄️ PostgreSQL Database")]
 ```
 
-| Feature | Customer | Staff | Admin |
-|---|---|---|---|
-| Browse vehicles | ✅ | ✅ | ✅ |
-| Make booking | ✅ | ❌ | ❌ |
-| Cancel own booking | ✅ | ❌ | ❌ |
-| Dispatch vehicle | ❌ | ✅ | ✅ |
-| Record return | ❌ | ✅ | ✅ |
-| Add damage fine | ❌ | ✅ | ✅ |
-| View all bookings | ❌ | ✅ | ✅ |
-| Revenue dashboard | ❌ | ❌ | ✅ |
-| Audit trail | ❌ | ❌ | ✅ |
-| Add/edit vehicles | ❌ | ❌ | ✅ |
-| View all users | ❌ | ❌ | ✅ |
+### Multi-Tier Role Hierarchy & Deletion Matrix
+
+| Feature / Action | Customer | Staff | Standard Admin | Super Admin (`maanas@gmail.com`) |
+|---|:---:|:---:|:---:|:---:|
+| Browse fleet & search | ✅ | ✅ | ✅ | ✅ |
+| Make booking | ✅ | ❌ | ❌ | ❌ |
+| Cancel own booking | ✅ | ❌ | ❌ | ❌ |
+| Dispatch vehicle | ❌ | ✅ | ✅ | ✅ |
+| Record return & odometer | ❌ | ✅ | ✅ | ✅ |
+| Add damage fine | ❌ | ✅ | ✅ | ✅ |
+| View revenue dashboard | ❌ | ❌ | ✅ | ✅ |
+| Inspect audit trail | ❌ | ❌ | ✅ | ✅ |
+| Add/edit fleet vehicles | ❌ | ❌ | ✅ | ✅ |
+| Create staff / admin accounts | ❌ | ❌ | ✅ | ✅ |
+| Block/Unblock customer & staff | ❌ | ❌ | ✅ | ✅ |
+| **Delete customer & staff** | ❌ | ❌ | **✅** | **✅** |
+| **Delete standard Admin** | ❌ | ❌ | **❌ (Forbidden)** | **✅ (Allowed)** |
+| **Delete Super Admin** | ❌ | ❌ | **❌ (Protected)** | **❌ (Cannot self-delete)** |
+
+> [!IMPORTANT]
+> **Privilege Escalation Defense:** A standard administrator cannot delete or block other administrators or the Super Admin. This protection is strictly enforced at the database transaction layer and recorded in the immutable audit trail.
 
 ---
 
@@ -1176,6 +1211,45 @@ Staff records return → PUT /api/staff/rentals/:id/return { odometer_in, damage
 Admin opens dashboard → GET /api/admin/stats
 → SELECT * FROM mv_monthly_revenue ORDER BY month DESC
 → Returns pre-computed monthly net revenue (no expensive aggregation at query time)
+```
+
+### Flow 5: Hierarchical User Deletion & Referential Integrity Purge
+
+```
+Admin requests user deletion → DELETE /api/admin/users/:id
+→ Verification:
+    → Is requester authenticated admin? (401/403)
+    → Is target user oneself? (Rejected: Cannot delete own account)
+    → Is target user Super Admin (maanas@gmail.com)? (Rejected: Protected account)
+    → Is target an admin and requester is NOT maanas@gmail.com? (Rejected: 403 Forbidden)
+→ withActor(requesterAdminId) {
+    → BEGIN TRANSACTION
+    → set_config('app.current_user_id', requesterAdminId)
+    
+    -- Step 1: Reassign staff vehicle dispatch foreign keys to current admin
+    → UPDATE rentals SET received_by = NULL WHERE received_by = targetId;
+    → UPDATE rentals SET handed_out_by = requesterAdminId WHERE handed_out_by = targetId;
+    
+    -- Step 2: Cascading cleanup for customer bookings and financial rows
+    → DELETE FROM damage_reports WHERE rental_id IN (SELECT rental_id FROM rentals WHERE booking_id IN (SELECT booking_id FROM bookings WHERE customer_id = targetId));
+    → DELETE FROM rentals WHERE booking_id IN (SELECT booking_id FROM bookings WHERE customer_id = targetId);
+    → DELETE FROM payments WHERE booking_id IN (SELECT booking_id FROM bookings WHERE customer_id = targetId);
+    → DELETE FROM reviews WHERE booking_id IN (SELECT booking_id FROM bookings WHERE customer_id = targetId);
+    → DELETE FROM booking_extras WHERE booking_id IN (SELECT booking_id FROM bookings WHERE customer_id = targetId);
+    → DELETE FROM bookings WHERE customer_id = targetId;
+    
+    -- Step 3: Remove customer profile (ON DELETE CASCADE)
+    → DELETE FROM customer_profiles WHERE user_id = targetId;
+    
+    -- Step 4: Delete user record
+    → DELETE FROM users WHERE user_id = targetId;
+    
+    -- Step 5: Invalidate active sessions
+    → DELETE FROM session WHERE sess::text LIKE '%"user_id":' || targetId || '%';
+    
+    → COMMIT
+  }
+→ Trigger trg_users_audit logs DELETE operation with OLD row stored as JSONB
 ```
 
 ---
@@ -1393,6 +1467,21 @@ It returns all rows from `v_vehicle_catalog` (which already filters for `status=
    - `SELECT * FROM audit_log ORDER BY changed_at DESC LIMIT 1` — latest audit entry
 4. Node.js combines results into one JSON response
 5. React renders the bar chart, stat cards, and recent bookings table
+
+---
+
+**Q26. How does the database maintain referential integrity when deleting users with active or historical records?**
+
+**A:** The `users` table has child dependencies: `customer_profiles` (has `ON DELETE CASCADE`), `bookings` (foreign key without cascade to protect financial records), and `rentals` (`handed_out_by` is `NOT NULL REFERENCES users`). If an administrator deletes a staff member who dispatched vehicles, a naive `DELETE` would fail with a foreign key violation. Our deletion transaction handles this by:
+1. Dynamically reassigning `rentals.handed_out_by` to the operating administrator and setting `received_by` to `NULL`.
+2. For customers, systematically purging dependent payments, reviews, damage reports, and bookings in reverse-dependency order.
+3. Executing the parent delete within an atomic transaction. This satisfies relational database referential integrity without leaving orphaned records.
+
+---
+
+**Q27. How is role hierarchy and authorization enforced between Super Admin and standard Admins?**
+
+**A:** GoDrive implements a multi-tier Role-Based Access Control (RBAC) hierarchy. The top-tier account is the **Super Admin (Owner)**, anchored by `maanas@gmail.com`. Standard administrators can manage fleet assets, view analytics, and delete staff or customer accounts. However, horizontal privilege escalation is blocked: a standard administrator cannot delete or block another administrator. Only the Super Admin has the privilege to delete or alter administrator accounts. Furthermore, the root Super Admin account is permanently immutable against deletion, preventing administrative lockout.
 
 ---
 
