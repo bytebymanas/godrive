@@ -1045,6 +1045,24 @@ app.get('/api/admin/audit', requireAuth, requireRole('admin'), wrap(async (req, 
   res.json(q.rows);
 }));
 
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const clientDist = path.resolve(__dirname, '../../client/dist');
+
+// Serve static frontend build
+app.use(express.static(clientDist));
+
+// SPA fallback for non-API routes
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  res.sendFile(path.join(clientDist, 'index.html'));
+});
+
 // Error handling
 app.use(notFound);
 app.use(errorHandler);

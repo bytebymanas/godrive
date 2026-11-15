@@ -3708,6 +3708,7 @@ function Auth({ signup = false }) {
   );
 }
 
+
 // ==========================================
 // 17. NOT FOUND PAGE
 // ==========================================
@@ -3749,7 +3750,7 @@ export default function App() {
           <Route path="/users" element={<UsersManager />} />
           <Route path="/audit" element={<AuditLog />} />
           <Route path="/signup" element={<Auth signup />} />
-
+         
 
           <Route path="/login" element={<Auth />} />
           <Route path="*" element={<NotFound />} />
@@ -3758,8 +3759,3 @@ export default function App() {
     </AuthProvider>
   );
 }
-
-
-
-
-
