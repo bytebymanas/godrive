@@ -126,11 +126,12 @@ npm run dev            # → http://localhost:5173
 
 > Password for all accounts: **`Password@123`**
 
-| Role | Email |
-|---|---|
-| 👑 Admin | `admin@example.com` |
-| 👷 Staff | `staff1@example.com` |
-| 🙋 Customer | `customer1@example.com` · `customer2@example.com` |
+| Role | Email | Privileges |
+|---|---|---|
+| 👑 Super Admin (Owner) | `maanas@gmail.com` | Full master privileges, can manage/delete all admins, staff & customers |
+| 🛡️ Admin | `admin@example.com` | Fleet oversight, reports, manage staff & customers (cannot delete admins) |
+| 👷 Staff | `staff1@example.com` | Dispatch, return inspections, damage penalty entry |
+| 🙋 Customer | `customer1@example.com` · `customer2@example.com` | Vehicle bookings, extras, reviews |
 
 ---
 

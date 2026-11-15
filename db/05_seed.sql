@@ -1,9 +1,10 @@
 \set ON_ERROR_STOP on
 -- ============================================================
--- USERS: 1 admin + 3 staff + 20 customers
+-- USERS: 1 Super Admin + 1 Admin + 3 staff + 20 customers
 -- ============================================================
 INSERT INTO users(full_name,email,phone,password_hash,role) VALUES
-('Manas Chhabra','admin@example.com','9876543210',crypt('Password@123',gen_salt('bf',10)),'admin'),
+('Manas Chhabra','maanas@gmail.com','9876543210',crypt('Password@123',gen_salt('bf',10)),'admin'),
+('Admin User','admin@example.com','9876543209',crypt('Password@123',gen_salt('bf',10)),'admin'),
 ('Staff One','staff1@example.com','9876543211',crypt('Password@123',gen_salt('bf',10)),'staff'),
 ('Staff Two','staff2@example.com','9876543212',crypt('Password@123',gen_salt('bf',10)),'staff'),
 ('Staff Three','staff3@example.com','9876543213',crypt('Password@123',gen_salt('bf',10)),'staff'),

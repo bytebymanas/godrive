@@ -679,16 +679,113 @@ app.patch('/api/admin/users/:id/status', requireAuth, requireRole('admin'), wrap
   });
   const { is_active } = schema.parse(req.body);
 
+  const targetId = Number(req.params.id);
+  const targetCheck = await pool.query('SELECT user_id, email, role FROM users WHERE user_id = $1', [targetId]);
+  if (!targetCheck.rowCount) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  const target = targetCheck.rows[0];
+  const requesterEmail = String(req.user.email || '').toLowerCase();
+  const targetEmail = String(target.email || '').toLowerCase();
+  const isSuperAdmin = requesterEmail === 'maanas@gmail.com';
+
+  if (targetEmail === 'maanas@gmail.com') {
+    return res.status(403).json({ error: 'Super Admin status cannot be altered' });
+  }
+
+  if (target.role === 'admin' && !isSuperAdmin) {
+    return res.status(403).json({ error: 'Only the Super Admin (maanas@gmail.com) can block/unblock another admin' });
+  }
+
   const q = await withActor(req.user.user_id, c =>
     c.query(
       'UPDATE users SET is_active = $1 WHERE user_id = $2 RETURNING user_id, full_name, email, role, is_active',
-      [is_active, req.params.id]
+      [is_active, targetId]
     )
   );
-  if (!q.rowCount) {
+  res.json(q.rows[0]);
+}));
+
+// DELETE /api/admin/users/:id
+app.delete('/api/admin/users/:id', requireAuth, requireRole('admin'), wrap(async (req, res) => {
+  const targetId = Number(req.params.id);
+  if (!targetId || isNaN(targetId)) {
+    return res.status(400).json({ error: 'Invalid user ID' });
+  }
+
+  const userQuery = await pool.query(
+    'SELECT user_id, full_name, email, role FROM users WHERE user_id = $1',
+    [targetId]
+  );
+  if (userQuery.rowCount === 0) {
     return res.status(404).json({ error: 'User not found' });
   }
-  res.json(q.rows[0]);
+
+  const target = userQuery.rows[0];
+  const requesterEmail = String(req.user.email || '').toLowerCase();
+  const targetEmail = String(target.email || '').toLowerCase();
+  const isSuperAdmin = requesterEmail === 'maanas@gmail.com';
+
+  // 1. Cannot delete oneself
+  if (req.user.user_id === target.user_id) {
+    return res.status(400).json({ error: 'You cannot delete your own account' });
+  }
+
+  // 2. Super Admin (maanas@gmail.com) is permanently protected
+  if (targetEmail === 'maanas@gmail.com') {
+    return res.status(403).json({ error: 'The Super Admin (Owner) account cannot be deleted' });
+  }
+
+  // 3. Regular admins cannot delete other admins
+  if (target.role === 'admin' && !isSuperAdmin) {
+    return res.status(403).json({
+      error: 'Permission denied: Only the Super Admin (maanas@gmail.com) can delete admin accounts'
+    });
+  }
+
+  // 4. Atomic deletion in transaction with foreign key dependency handling
+  await withActor(req.user.user_id, async client => {
+    // Reassign rentals handled by this user to the current admin
+    await client.query('UPDATE rentals SET received_by = NULL WHERE received_by = $1', [targetId]);
+    await client.query('UPDATE rentals SET handed_out_by = $1 WHERE handed_out_by = $2', [req.user.user_id, targetId]);
+
+    // Clean up customer bookings and dependent rows if any
+    const bQ = await client.query('SELECT booking_id FROM bookings WHERE customer_id = $1', [targetId]);
+    if (bQ.rows.length > 0) {
+      const bookingIds = bQ.rows.map(r => r.booking_id);
+      const rQ = await client.query('SELECT rental_id FROM rentals WHERE booking_id = ANY($1)', [bookingIds]);
+      if (rQ.rows.length > 0) {
+        const rentalIds = rQ.rows.map(r => r.rental_id);
+        await client.query('DELETE FROM damage_reports WHERE rental_id = ANY($1)', [rentalIds]);
+        await client.query('DELETE FROM rentals WHERE rental_id = ANY($1)', [rentalIds]);
+      }
+      await client.query('DELETE FROM payments WHERE booking_id = ANY($1)', [bookingIds]);
+      await client.query('DELETE FROM reviews WHERE booking_id = ANY($1)', [bookingIds]);
+      await client.query('DELETE FROM booking_extras WHERE booking_id = ANY($1)', [bookingIds]);
+      await client.query('DELETE FROM bookings WHERE booking_id = ANY($1)', [bookingIds]);
+    }
+
+    // Customer profile
+    await client.query('DELETE FROM customer_profiles WHERE user_id = $1', [targetId]);
+
+    // Delete user from users table
+    await client.query('DELETE FROM users WHERE user_id = $1', [targetId]);
+
+    // Clear session store if active
+    try {
+      await client.query(
+        `DELETE FROM session WHERE sess::text LIKE '%"user_id":' || $1 || '%' OR sess::text LIKE '%"user_id": ' || $1 || '%'`,
+        [targetId]
+      );
+    } catch (err) {}
+  });
+
+  res.json({
+    success: true,
+    message: `User ${target.full_name} (${target.email}) deleted successfully`,
+    deleted_id: targetId,
+  });
 }));
 
 // GET /api/admin/vehicles
@@ -1079,7 +1176,26 @@ app.get('*', (req, res, next) => {
 app.use(notFound);
 app.use(errorHandler);
 
+// Ensure Super Admin user exists
+async function ensureSuperAdmin() {
+  try {
+    const check = await pool.query(`SELECT user_id FROM users WHERE LOWER(email) = 'maanas@gmail.com'`);
+    if (check.rowCount === 0) {
+      const hash = await bcrypt.hash('Password@123', 10);
+      await pool.query(`
+        INSERT INTO users (full_name, email, phone, password_hash, role, is_active)
+        VALUES ('Manas Chhabra', 'maanas@gmail.com', '9876543210', $1, 'admin', true)
+        ON CONFLICT (email) DO UPDATE SET role = 'admin', is_active = true
+      `, [hash]);
+      console.log('👑 Super Admin user maanas@gmail.com initialized (Password: Password@123)');
+    }
+  } catch (err) {
+    console.error('Error ensuring super admin:', err.message);
+  }
+}
+
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`API listening on port ${PORT}`);
+  ensureSuperAdmin();
 });

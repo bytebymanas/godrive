@@ -40,7 +40,8 @@ import {
   Mail,
   RefreshCw,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Trash2
 } from 'lucide-react';
 import {
   BarChart,
@@ -163,7 +164,26 @@ function StatusChip({ status }) {
   return <span className={`status ${s}`}>{status}</span>;
 }
 
-function RoleChip({ role }) {
+function RoleChip({ role, email }) {
+  if (email && String(email).toLowerCase() === 'maanas@gmail.com') {
+    return (
+      <span
+        className="chip"
+        style={{
+          background: '#fef08a',
+          color: '#854d0e',
+          border: '1px solid #facc15',
+          fontWeight: 800,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '3px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.08)'
+        }}
+      >
+        👑 Super Admin
+      </span>
+    );
+  }
   const r = String(role || '').toLowerCase();
   return <span className={`chip chip-${r}`}>{role}</span>;
 }
@@ -3081,6 +3101,8 @@ function UsersManager() {
   const [roleFilter, setRoleFilter] = useState('all');
 
   const [showAddStaff, setShowAddStaff] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const [staffForm, setStaffForm] = useState({
     full_name: '',
     email: '',
@@ -3088,6 +3110,8 @@ function UsersManager() {
     password: '',
     role: 'staff',
   });
+
+  const isSuperAdmin = currentUser?.email?.toLowerCase() === 'maanas@gmail.com';
 
   const loadUsers = () => {
     setLoading(true);
@@ -3116,6 +3140,39 @@ function UsersManager() {
       loadUsers();
     } catch (e) {
       toast.error(e.message);
+    }
+  };
+
+  const handleDeleteUser = u => {
+    if (u.user_id === currentUser?.user_id) {
+      toast.error('You cannot delete your own account');
+      return;
+    }
+    if (u.email?.toLowerCase() === 'maanas@gmail.com') {
+      toast.error('Super Admin (Owner) account cannot be deleted');
+      return;
+    }
+    if (u.role === 'admin' && !isSuperAdmin) {
+      toast.error('Only the Super Admin (maanas@gmail.com) can delete other admins');
+      return;
+    }
+    setDeleteConfirm(u);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
+    try {
+      setDeleting(true);
+      const res = await api(`/admin/users/${deleteConfirm.user_id}`, {
+        method: 'DELETE',
+      });
+      toast.success(res.message || 'User deleted successfully');
+      setDeleteConfirm(null);
+      loadUsers();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -3198,41 +3255,78 @@ function UsersManager() {
             </tr>
           </thead>
           <tbody>
-            {filteredUsers.map(u => (
-              <tr key={u.user_id}>
-                <td>#{u.user_id}</td>
-                <td><b>{u.full_name}</b></td>
-                <td>{u.email}</td>
-                <td>{u.phone || '—'}</td>
-                <td><RoleChip role={u.role} /></td>
-                <td><b>{u.total_bookings || 0}</b></td>
-                <td>
-                  {Number(u.total_fines || 0) > 0 ? (
-                    <span style={{ color: '#dc2626', fontWeight: 700 }}>+{money(u.total_fines)}</span>
-                  ) : (
-                    <span style={{ color: '#9ca3af' }}>₹0</span>
-                  )}
-                </td>
-                <td>
-                  <span className={`status ${u.is_active ? 'available' : 'cancelled'}`}>
-                    {u.is_active ? 'Active' : 'Blocked'}
-                  </span>
-                </td>
-                <td style={{ fontSize: '12px', color: '#748079' }}>
-                  {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
-                </td>
-                <td>
-                  {u.user_id !== currentUser?.user_id && (
-                    <button
-                      onClick={() => handleToggleStatus(u)}
-                      className={u.is_active ? 'btn-danger btn-sm' : 'btn-secondary btn-sm'}
-                    >
-                      {u.is_active ? 'Block' : 'Unblock'}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {filteredUsers.map(u => {
+              const isTargetSuperAdmin = u.email?.toLowerCase() === 'maanas@gmail.com';
+              const isSelf = u.user_id === currentUser?.user_id;
+              const canDelete = !isTargetSuperAdmin && !isSelf && (u.role !== 'admin' || isSuperAdmin);
+              const canToggle = !isTargetSuperAdmin && !isSelf && (u.role !== 'admin' || isSuperAdmin);
+
+              return (
+                <tr key={u.user_id}>
+                  <td>#{u.user_id}</td>
+                  <td><b>{u.full_name}</b></td>
+                  <td>{u.email}</td>
+                  <td>{u.phone || '—'}</td>
+                  <td><RoleChip role={u.role} email={u.email} /></td>
+                  <td><b>{u.total_bookings || 0}</b></td>
+                  <td>
+                    {Number(u.total_fines || 0) > 0 ? (
+                      <span style={{ color: '#dc2626', fontWeight: 700 }}>+{money(u.total_fines)}</span>
+                    ) : (
+                      <span style={{ color: '#9ca3af' }}>₹0</span>
+                    )}
+                  </td>
+                  <td>
+                    <span className={`status ${u.is_active ? 'available' : 'cancelled'}`}>
+                      {u.is_active ? 'Active' : 'Blocked'}
+                    </span>
+                  </td>
+                  <td style={{ fontSize: '12px', color: '#748079' }}>
+                    {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
+                  </td>
+                  <td>
+                    {isTargetSuperAdmin ? (
+                      <span style={{ fontSize: '11px', color: '#854d0e', fontWeight: 700, padding: '3px 8px', background: '#fef9c3', borderRadius: '6px' }}>
+                        👑 Protected Owner
+                      </span>
+                    ) : isSelf ? (
+                      <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>
+                        Your Account
+                      </span>
+                    ) : (
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        {canToggle && (
+                          <button
+                            onClick={() => handleToggleStatus(u)}
+                            className={u.is_active ? 'btn-secondary btn-sm' : 'btn-primary btn-sm'}
+                            title={u.is_active ? 'Block account' : 'Activate account'}
+                          >
+                            {u.is_active ? 'Block' : 'Unblock'}
+                          </button>
+                        )}
+                        {canDelete ? (
+                          <button
+                            onClick={() => handleDeleteUser(u)}
+                            className="btn-danger btn-sm"
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                            title={`Delete ${u.role}`}
+                          >
+                            <Trash2 size={12} /> Delete
+                          </button>
+                        ) : u.role === 'admin' ? (
+                          <span
+                            style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic' }}
+                            title="Only the Super Admin (maanas@gmail.com) can delete other admins"
+                          >
+                            Admin protected
+                          </span>
+                        ) : null}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -3302,6 +3396,45 @@ function UsersManager() {
               <button type="submit" className="btn-primary">Create User</button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm && (
+        <Modal title="Confirm Permanent Deletion" onClose={() => setDeleteConfirm(null)} maxWidth="480px">
+          <div style={{ display: 'grid', gap: '14px' }}>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', background: '#fef2f2', border: '1px solid #fecaca', padding: '14px', borderRadius: '10px' }}>
+              <AlertTriangle size={24} style={{ color: '#dc2626', flexShrink: 0 }} />
+              <div style={{ fontSize: '13px', color: '#991b1b', lineHeight: 1.5 }}>
+                Are you sure you want to permanently delete <strong>{deleteConfirm.full_name}</strong> ({deleteConfirm.email})?
+                <div style={{ marginTop: '6px' }}>
+                  Role: <RoleChip role={deleteConfirm.role} email={deleteConfirm.email} />
+                </div>
+              </div>
+            </div>
+            <p style={{ margin: 0, fontSize: '12px', color: '#65716d', lineHeight: 1.6 }}>
+              This action is permanent and cannot be undone. Associated records will be purged or safely reassigned in the database ledger.
+            </p>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '10px' }}>
+              <button
+                type="button"
+                onClick={() => setDeleteConfirm(null)}
+                className="btn-secondary"
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                className="btn-danger"
+                disabled={deleting}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Trash2 size={14} /> {deleting ? 'Deleting…' : 'Delete Permanently'}
+              </button>
+            </div>
+          </div>
         </Modal>
       )}
     </main>
